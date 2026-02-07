@@ -1,6 +1,7 @@
-Secure Digital Document Vault
-Integrantes:
-Domínguez Chávez Jesús Abner (Head of Testing)
-Hernandez Ruiz de Esparza Guillermo (Head of Documentation)
-Sanchez Villlalpando Johan (Head of Coding)
-Quintana Mora Luis Angel (Head of Architecture)
+# Secure Digital Document Vault
+
+## Members:
+ - Domínguez Chávez Jesús Abner **(Chief Testing)**
+ - Hernandez Ruiz de Esparza Guillermo **(Chief Documentation)**
+ - Sanchez Villlalpando Johan **(Chief Coding)**
+ - Quintana Mora Luis Angel **(Chief Architecture)**
