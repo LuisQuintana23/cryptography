@@ -37,11 +37,13 @@ Although we aim to solve the after dead preservation of documents there are some
 ### Confidentiality of file contents
 An attacker who obtains the encrypted vault container must not be able to learn the contents of stored documents without access to the master secret or the required majority of trusted individuals.
 ### Integrity of file contents
-Any unauthorized modification of encrypted documents must be detectable before revealing decrypted content. The system must not output altered plaintext without detecting tampering.
+The system must generate and store a cryptographic hash for every file upon upload and validate this hash against the file contents upon every retrieval to ensure data has not been altered.
 ### Authenticity of file sender
 Trusted individuals must be able to verify that the vault was created by the legitimate owner and not by an attacker. If the vault is replaced or forged, the system must detect the lack of authenticity.
 ### Confidentiality of private keys
+The system must encrypt all private keys in use or not in use, ensuring they are accessible only to the authenticated key owner and are never stored, logged, or exposed in plaintext.
 ### Protection against tampering
+Any unauthorized modification of encrypted documents must be detectable before revealing decrypted content. The system must not output altered plaintext without detecting tampering.
 
 ## 4. Threat Model
 ### Assets
