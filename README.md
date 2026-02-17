@@ -96,6 +96,14 @@ To ensure the correct functionality we asume that the following is achieved:
    * Security Property at Risk: Confidentiality.
 ## 7. Design Constraints Derived from Requirements
 
+| Requirement | Design Constraint |
+|------------|-------------------|
+| Confidentiality of file contents | Must use AEAD encryption with unique symmetric keys per file |
+| Integrity of file contents | Must use authenticated encryption and cryptographic hashing for verification |
+| Authenticity of file sender | Must implement digital signatures to verify vault owner identity |
+| Confidentiality of private keys | Must encrypt private keys using password-based key derivation (KDF) |
+| Prevent unilateral access by single trustee | Must implement secret sharing scheme requiring majority threshold (k-of-n) |
+
 ## Core Functionalities
 
 - Generate a unique symmetric key for each file.
