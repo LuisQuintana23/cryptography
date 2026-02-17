@@ -33,6 +33,53 @@ Although we aim to solve the after dead preservation of documents there are some
 
 ## 2. Architecture Diagram
 
+## Architecture Description
+For the architecture, we have defined the following main components:
+### 1. Owner
+The central entity around which the system operates. The Owner is responsible for managing the vault and defining access policies.
+* Authentication: password + two-factor authentication (2FA)
+* Manages documents and trusted people
+* Generates and digitally signs the Vault
+* Controls the Master Key
+### 2. Trusted People
+Individuals designated by the Owner to be trusted with future access to the vault.
+* Individual authentication: password + two-factor authentication (2FA)
+* Each possesses a private key
+* Receives an encrypted share of the secret
+* Must collaborate to reach the required 50% + 1 threshold
+### 3. Key Management Module
+This component is responsible for handling cryptographic keys for both the Owner and the Trusted People.
+* Generation of a unique symmetric key per file
+* Hybrid encryption for key protection
+* Secret fragmentation using a threshold scheme
+* Key rotation when the list of trusted people changes
+### 4. Vault Storage
+This component stores the sensitive data uploaded by the Owner. The Vault Storage may be compromised without revealing any sensitive information. Content includes:
+* Encrypted documents
+* Integrity hashes
+* Digital signatures
+* Encrypted metadata
+### 5. Access Control and Verification Layer
+This layer enforces security policies and validates cryptographic guarantees.
+* Verifies authentication and access permissions
+* Validates digital signatures
+* Verifies integrity hashes before decryption
+* Reconstructs the secret only if the required majority is reached
+### System Workflow
+Based on these components, the general system workflow is defined as follows:
+1. The Owner uploads a document.
+2. A unique symmetric key is generated.
+3. The document is encrypted.
+4. The file key is protected using hybrid encryption.
+5. The Master Key is split among the Trusted People.
+6. All data is stored encrypted in the Vault.
+7. After the Owner’s death, Trusted People provide their tokens.
+8. If the 50% + 1 threshold is reached, the Master Key is reconstructed.
+9. Signature and integrity verification are performed.
+10. The vault content is decrypted.
+### Image at:
+![cryptography](docs/architecture.png)
+
 ## 3. Security Requirements
 ### Confidentiality of file contents
 An attacker who obtains the encrypted vault container must not be able to learn the contents of stored documents without access to the master secret or the required majority of trusted individuals.
