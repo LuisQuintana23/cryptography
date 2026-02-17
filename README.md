@@ -151,15 +151,6 @@ To ensure the correct functionality,y we assume that the following is achieved:
 | Confidentiality of private keys | Must encrypt private keys using password-based key derivation (KDF) |
 | Prevent unilateral access by single trustee | Must implement secret sharing scheme requiring majority threshold (k-of-n) |
 
-## Core Functionalities
-
-- Generate a unique symmetric key for each file.
-- Protect file keys using recipients’ public keys (hybrid encryption).
-- Digitally sign documents to guarantee authenticity.
-- Verify signatures before decrypting any content.
-- Protect private keys using a password-based key derivation function (KDF).
-- Allow secure sharing with multiple recipients.
-- Provide a basic key backup and recovery mechanism.
 
 ## Members:
  - Domínguez Chávez Jesús Abner **(Chief Testing)**
