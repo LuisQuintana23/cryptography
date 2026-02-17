@@ -2,7 +2,7 @@
 In this project, we'll design and implement a secure system for protecting, sharing, and verifying digital documents using modern applied cryptographic techniques.
 
 ## 1. System Overview
-### Problem that we solve with this proyect
+### Problem that we solve with this project
 When a person dies without sharing access credentials to financial accounts, legal documents, or digital records, their relatives may face serious difficulties accessing essential information. At the same time, sharing full access in advance creates significant security risks during the owner’s lifetime.
 
 This system provides a structured and secure mechanism to:
@@ -12,24 +12,24 @@ This system provides a structured and secure mechanism to:
 * Prevent unilateral access by a single trusted person
 * Protect stored data even if the storage location is compromised
 
-The owner has its own password and two factor autentication to add, remove or alter the documents or list of trusted people. Any trusted people must create a paswword and define a two factor authentication.
+The owner has it's own password and two factor autentication to add, remove, or alter the documents or list of trusted people. Any trusted people must create a paswword and define a two factor authentication.
 
-For example the owner can designate 5 trusted people the required number of trusted people aproval es set al 50% + 1, For the exmple 3 persons. During the lifetime of the owner he can add or remove peolpe to the trusted list, when one person is removed all the tokens are changed to ensure the old token wont work.
+For example, the owner can designate 5 trusted people, as the required number of trusted people approval is set at 50% + 1. For the exmple, 3 persons. During the lifetime of the owner, he can add or remove people to the trusted list. When one person is removed, all the tokens are changed to ensure the old token won't work.
 ### Features
 * Ensure documents remain confidential during the owner’s lifetime
 * Protect stored data even if the storage location is compromised
 * Controlled access after death
-* Define and modify list of trusted people
+* Define and modify the list of trusted people
 * Protect against unilateral misuse by a single trusted person
 * Ensure integrity verification of stored data
 * Enforce majority-based reconstruction policy
 ### Out of scope
-Although we aim to solve the after dead preservation of documents there are some scenarios that we cant control:
+Although we aim to solve the after-death preservation of documents, there are some scenarios that we can't control:
 * Automatic death verification mechanisms
-* More than the number of trusted people decided to act on bad faith
+* More than the number of trusted people decided to act in bad faith
 * Side-channel attacks
 * Biometric authentication
-* The minimmun of trusted people is dead, lost acces to the system or refuses to give their token (legal procedures must be folowed)
+* The minimum of trusted people is dead, lost access to the system, or refuses to give their token (legal procedures must be followed)
 
 ## 2. Architecture Diagram
 
@@ -95,25 +95,25 @@ Any unauthorized modification of encrypted documents must be detectable before r
 ## 4. Threat Model
 ### Assets
 * Files: all the plain text files stored
-* Master key: the key that is used to add, remove and alter the files
+* Master key: the key that is used to add, remove, and alter the files
 * Private keys: all the keys (owner and trusted people)
 ### Adversaries
-We define the followint type of adversaries:
-* External: any not trusted person that tries to acces the information
+We define the following types of adversaries:
+* External: any not trusted person who tries to access the information
     * Attackers know the system design
-    * Can read all the encripted documents
+    * Can read all the encrypted documents
     * Can modify documents
-    * Doesnt know the owner key or trusted person key
-    * Cant break the encription algorithm
-    * Cant recreate the master key
-* Malicius trusted person: any person or group of trusted persons that doesnt reach the required tockens that tries to acces the information. 
-    * Can read all the encripted documents
+    * Doesn't know the owner key or any trusted person key
+    * Can't break the encryption algorithm
+    * Can't recreate the master key
+* Malicious trusted person: any person or group of trusted persons that doesn't reach the required tockens that tries to access the information. 
+    * Can read all the encrypted documents
     * Can modify documents
-    * Doesnt know the owner key
-    * Cant break the encription algorithm
-    * Cant recreate the master key
+    * Doesn't know the owner key
+    * Can't break the encryption algorithm
+    * Can't recreate the master key
 ## 5. Trust Assumptions
-To ensure the correct functionality we asume that the following is achieved:
+To ensure the correct functionality,y we assume that the following is achieved:
 * Users choose sufficiently strong passwords
 * Secure randomness is available
 * Cryptographic primitives behave as expected
@@ -124,7 +124,7 @@ To ensure the correct functionality we asume that the following is achieved:
    * What could go wrong: An attacker with temporary access could upload a fraudulent version or corrupted assets before the vault is sealed. Additionally, uploading malware could target the beneficiary upon retrieval.
    * Security Property at Risk: Integrity & Availability.
 * Metadata Parsing
-   * What could go wrong: Malformed metadata in uploaded legal documents could exploit the system to reveal the identity of the beneficiaries or the conditions of the vault's release to unauthorized person.
+   * What could go wrong: Malformed metadata in uploaded legal documents could exploit the system to reveal the identity of the beneficiaries or the conditions of the vault's release to an unauthorized person.
    * Security Property at Risk: Confidentiality.
 * Key Import/Export
    * What could go wrong: If the system uses multiple keys for trustees, an attacker could intercept the key shares during export, or a beneficiary might import a compromised private key, allowing a third party to steal the inheritance immediately upon release.
