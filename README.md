@@ -78,7 +78,7 @@ Based on these components, the general system workflow is defined as follows:
 9. Signature and integrity verification are performed.
 10. The vault content is decrypted.
 ### Image at:
-![cryptography](docs/architecture.png)
+![cryptography](architecture.png)
 
 ## 3. Security Requirements
 ### Confidentiality of file contents
