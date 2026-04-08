@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mi App Flask</title>
+</head>
+<body>
+    <h1>Bienvenido a proyecto vault</h1>
+    
+    {% if 'usuario' in session %}
+        <p>Estás logueado como: <strong>{{ session['usuario'] }}</strong></p>
+        <a href="{{ url_for('main.dashboard') }}">Ir al Dashboard</a> | 
+        <a href="{{ url_for('main.logout') }}">Cerrar Sesión</a>
+    {% else %}
+        <p>No has iniciado sesión.</p>
+        <a href="{{ url_for('main.login') }}">Iniciar Sesión</a>
+    {% endif %}
+</body>
+</html>

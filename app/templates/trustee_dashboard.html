@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel de Fiduciario</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .card { border: 1px solid #ccc; padding: 15px; margin-bottom: 15px; border-radius: 5px; background-color: #f9f9f9; }
+        .btn { padding: 8px 15px; background-color: #007bff; color: white; text-decoration: none; border-radius: 3px; border: none; cursor: pointer; display: inline-block; }
+        .btn:hover { background-color: #0056b3; }
+        .btn-disabled { background-color: #28a745; padding: 8px 15px; color: white; border-radius: 3px; display: inline-block; cursor: default; }
+    </style>
+</head>
+<body>
+    <h2>Panel de Fiduciario (Trustee)</h2>
+    <p>Bienvenido. Aquí se listan los documentos protegidos en la bóveda de los cuales posees un fragmento criptográfico de recuperación.</p>
+
+    {% if shares %}
+        {% for share in shares %}
+        <div class="card">
+            <h3 style="margin-top: 0;">Documento: {{ share.document.filename }}</h3>
+            <p><strong>Propietario:</strong> {{ share.document.owner.username }}</p>
+            <p><strong>Fecha de sellado:</strong> {{ share.document.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+
+            {% if share.plain_fragment %}
+                <span class="btn-disabled">Token Liberado ✓</span>
+            {% else %}
+                <a href="{{ url_for('main.release_share', share_id=share.id) }}" class="btn">Liberar mi Token</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>No tienes fragmentos asignados en este momento.</p>
+    {% endif %}
+
+    <br><br>
+
+    <hr>
+    <div style="background-color: #d1ecf1; padding: 15px; border-radius: 5px; border: 1px solid #bee5eb;">
+        <h4>Tu Identidad como Fiduciario</h4>
+        <p>Como fiduciario, posees fragmentos de llaves de otros usuarios. Para garantizar que puedas ayudarlos en el futuro, descarga tu archivo de identidad. <strong>Este archivo es necesario para la recuperación offline.</strong></p>
+        <a href="{{ url_for('main.download_identity') }}" style="padding: 10px; background-color: #17a2b8; color: white; text-decoration: none; border-radius: 5px;">Descargar mi Identidad (.json)</a>
+    </div>
+    <a href="{{ url_for('main.dashboard') }}">Volver al Dashboard Principal</a>
+</body>
+</html>

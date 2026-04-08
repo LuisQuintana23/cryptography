@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Liberar Token</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .warning-box { 
+            border-left: 5px solid #ffc107; 
+            background-color: #fff3cd; 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            border-radius: 0 5px 5px 0;
+        }
+        .btn-danger { 
+            padding: 10px 20px; 
+            background-color: #dc3545; 
+            color: white; 
+            border: none; 
+            border-radius: 3px;
+            cursor: pointer; 
+            font-size: 16px;
+        }
+        .btn-danger:hover { background-color: #c82333; }
+        input[type="password"] { padding: 8px; width: 250px; }
+    </style>
+</head>
+<body>
+    <h2>Liberar Token Criptográfico</h2>
+
+    <div class="warning-box">
+        <p><strong>Atención:</strong> Estás a punto de aplicar tu llave privada para descifrar tu fragmento de recuperación del documento <strong>{{ document.filename }}</strong>.</p>
+        <p>Solo debes realizar esta acción si el propietario (<strong>{{ document.owner.username }}</strong>) ha fallecido o si existe una justificación legal. <br><br>
+        Si con tu token se alcanza el umbral de firmas necesario (50% + 1 de los fiduciarios), <strong>el archivo original se descifrará y se descargará automáticamente en tu navegador.</strong></p>
+    </div>
+
+    <form method="POST">
+        <label for="password">Para autorizar la operación, ingresa tu contraseña de fiduciario:</label><br><br>
+        <input type="password" name="password" placeholder="Tu contraseña" required><br><br>
+        <button type="submit" class="btn-danger">Confirmar y Liberar Token</button>
+    </form>
+
+    <br><br>
+    <a href="{{ url_for('main.trustee_dashboard') }}">Cancelar y volver al panel</a>
+</body>
+</html>

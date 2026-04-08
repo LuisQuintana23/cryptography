@@ -1,0 +1,35 @@
+Para ejecutar esto:
+
+ir a la ruta
+cd ruta/ruta/ruta
+
+crear entorno virtual
+python -m venv venv
+
+activar entorno virtual
+venv\Scripts\activate
+
+ya que aparezca
+(venv) ... 
+
+instalar requerimientos
+pip install -r requirements.txt
+
+configurar variables de entorno
+set FLASK_APP=app.py
+set FLASK_ENV=development
+
+iniciar base de datos
+estando en (venv):
+flask --app app init-db
+
+
+ejecutar el programa:
+flask run
+o
+python app.py
+
+ir en el navegador a 
+http://localhost:5000 
+o
+http://127.0.0.1:5000
