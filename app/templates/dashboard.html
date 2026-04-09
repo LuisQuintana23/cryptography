@@ -1,55 +1,73 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Dashboard Principal</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
-        .btn { padding: 8px 15px; background-color: #007bff; color: white; text-decoration: none; border-radius: 3px; display: inline-block; }
-        .btn:hover { background-color: #0056b3; }
-        .vault-item { margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; }
-    </style>
-</head>
-<body>
-    <h2>Panel de Propietario</h2>
-    <p>Bienvenido, <strong>{{ usuario }}</strong>.</p>
-    
-    <a href="{{ url_for('main.upload_file') }}" class="btn" style="background-color: #28a745;">+ Sellar Nuevo Documento</a>
-    <br><br>
+{% extends "base.html" %}
 
-    <h3>Mis Bóvedas (.vault)</h3>
-    {% if owned_documents %}
-        <ul>
-            {% for doc in owned_documents %}
-            <li class="vault-item">
-                <strong>{{ doc.filename }}</strong> 
-                <span style="color: #666; font-size: 0.9em;">(Sellado: {{ doc.created_at.strftime('%d/%m/%Y %H:%M') }})</span>
-                <a href="{{ url_for('main.download_vault', doc_id=doc.id) }}" class="btn" style="margin-left:15px; background-color: #6c757d; padding: 5px 10px;">💾 Descargar .vault</a>
-            </li>
-            {% endfor %}
-        </ul>
-    {% else %}
-        <p>Aún no has sellado ningún documento en el sistema.</p>
-    {% endif %}
+{% block title %}Panel de Propietario - Proyecto Vault{% endblock %}
 
-    <hr>
-    
-    <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px;">
-        <h4>Respaldo de Identidad</h4>
-        <p>Descarga tu identidad digital para poder recuperar tus archivos offline si es necesario.</p>
-        <a href="{{ url_for('main.download_identity') }}" class="btn">Descargar mi Identidad (.json)</a>
+{% block content %}
+<div class="row mb-5 align-items-center">
+    <div class="col-md-8">
+        <h2 class="fw-bold mb-1">Panel de Propietario</h2>
+        <p class="text-muted fs-5 mb-0">Bienvenido a tu bóveda segura, <strong>{{ usuario }}</strong>.</p>
+    </div>
+    <div class="col-md-4 text-md-end mt-3 mt-md-0">
+        <a href="{{ url_for('main.upload_file') }}" class="btn btn-success btn-lg shadow-sm d-flex align-items-center gap-2">
+            <i class="bi bi-file-earmark-lock2-fill"></i> Sellar Nuevo Documento
+        </a>
+    </div>
+</div>
+
+<h3 class="h4 mb-3 border-bottom border-secondary pb-2">Mis Bóvedas (.vault)</h3>
+
+{% if owned_documents %}
+    <div class="list-group shadow-sm mb-5">
+        {% for doc in owned_documents %}
+        <div class="list-group-item list-group-item-dark d-flex flex-column flex-sm-row justify-content-between align-items-sm-center p-3 border-secondary">
+            <div class="mb-2 mb-sm-0">
+                <h5 class="mb-1 fw-bold text-light">{{ doc.filename }}</h5>
+                <small class="text-muted">Sellado: {{ doc.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+            </div>
+            <a href="{{ url_for('main.download_vault', doc_id=doc.id) }}" class="btn btn-secondary btn-sm d-flex align-items-center gap-2">
+                <i class="bi bi-cloud-arrow-down-fill"></i> Descargar .vault
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-dark border-secondary text-center py-4 mb-5" role="alert">
+        <p class="mb-0 text-muted fs-5">Aún no has sellado ningún documento en el sistema.</p>
+    </div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card bg-dark border-secondary h-100 shadow-sm">
+            <div class="card-body d-flex flex-column">
+                <h4 class="card-title text-light">Respaldo de Identidad</h4>
+                <p class="card-text text-muted flex-grow-1">
+                    Descarga tu identidad digital criptográfica para poder recuperar tus archivos de forma local (offline) si es necesario.
+                </p>
+                <div class="mt-auto">
+                    <a href="{{ url_for('main.download_identity') }}" class="btn btn-outline-light w-100 d-flex align-items-center justify-content-center gap-2">
+                        <i class="bi bi-person-badge"></i> Descargar mi Identidad (.json)
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <hr>
-    
-    <div style="background-color: #d1ecf1; padding: 15px; border-radius: 5px; border: 1px solid #bee5eb;">
-        <h4>Modo Fiduciario (Trustee)</h4>
-        <p>¿Alguien te designó como su fiduciario de confianza? Accede a tu panel para ver los fragmentos que resguardas y liberar tus tokens cuando sea necesario.</p>
-        <a href="{{ url_for('main.trustee_dashboard') }}" class="btn" style="background-color: #17a2b8;">🔑 Ir a mi Panel de Fiduciario</a>
+    <div class="col-md-6">
+        <div class="card bg-dark border-info h-100 shadow-sm">
+            <div class="card-body d-flex flex-column">
+                <h4 class="card-title text-info">Modo Fiduciario (Trustee)</h4>
+                <p class="card-text text-muted flex-grow-1">
+                    ¿Alguien te designó como su fiduciario de confianza? Accede a tu panel para ver los fragmentos que resguardas y liberar tus tokens cuando se requiera.
+                </p>
+                <div class="mt-auto">
+                    <a href="{{ url_for('main.trustee_dashboard') }}" class="btn btn-info text-dark fw-bold w-100 d-flex align-items-center justify-content-center gap-2">
+                        <i class="bi bi-key-fill"></i> Ir a mi Panel de Fiduciario
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
-    <a href="{{ url_for('main.index') }}">Volver al inicio</a>
-    <br><br>
-    <a href="{{ url_for('main.logout') }}" style="color: red;">Cerrar Sesión</a>
-</body>
-</html>
-</html>
+</div>
+{% endblock %}
