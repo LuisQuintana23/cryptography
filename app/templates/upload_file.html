@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Sellar Documento - Proyecto Vault{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-12 col-md-8 col-lg-6">
+        
+        <div class="mb-4 text-center">
+            <h2 class="fw-bold"><i class="bi bi-file-earmark-lock2 text-success me-2"></i>Sellar Nuevo Documento</h2>
+            <p class="text-muted">Sube tu archivo para cifrarlo y fragmentar sus llaves de recuperación.</p>
+        </div>
+
+        <div class="card bg-dark border-secondary shadow-lg">
+            <div class="card-body p-4 p-md-5">
+                
+                <div class="alert bg-dark border-info text-light d-flex align-items-center gap-3 mb-4 shadow-sm" role="alert">
+                    <i class="bi bi-shield-check text-info fs-3"></i>
+                    <div>
+                        <h6 class="alert-heading mb-1 text-info fw-bold">Red de Confianza Activa</h6>
+                        <p class="mb-0 small">
+                            Hay <strong>{{ trustees_count }} fiduciarios</strong> disponibles en el sistema para resguardar fragmentos de tu llave.
+                        </p>
+                    </div>
+                </div>
+
+                <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                    
+                    <div class="mb-4">
+                        <label for="file" class="form-label text-light fw-bold">Selecciona el documento a proteger</label>
+                        <p class="text-muted small mb-2">Formatos recomendados: PDF, TXT, DOCX, JPG.</p>
+                        
+                        <input class="form-control form-control-lg bg-dark border-secondary text-light" type="file" id="file" name="file" required>
+                    </div>
+
+                    <div class="mb-4 p-3 bg-secondary bg-opacity-10 rounded border border-secondary border-opacity-50">
+                        <small class="text-muted d-flex gap-2">
+                            <i class="bi bi-lock-fill mt-1"></i>
+                            <span>
+                                <strong>Seguridad en reposo:</strong> Tu archivo será cifrado localmente en el servidor usando AES-GCM antes de ser almacenado. El sistema generará una bóveda (.vault) inaccesible sin los tokens de recuperación.
+                            </span>
+                        </small>
+                    </div>
+                    
+                    <div class="d-grid gap-3 d-md-flex justify-content-md-end mt-5">
+                        <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-light px-4">
+                            Cancelar
+                        </a>
+                        <button type="submit" class="btn btn-success px-4 d-flex align-items-center justify-content-center gap-2 shadow-sm">
+                            <i class="bi bi-safe-fill"></i> Cifrar y Sellar Bóveda
+                        </button>
+                    </div>
+                    
+                </form>
+
+            </div>
+        </div>
+        
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('uploadForm').addEventListener('submit', function(e) {
+    e.preventDefault(); 
+    // Alerta de procesamiento (Crucial para operaciones criptográficas)
+    Swal.fire({
+        title: 'Cifrando Documento',
+        text: 'Aplicando AES-GCM y distribuyendo fragmentos. Por favor espera...',
+        icon: 'info',
+        background: '#212529', color: '#f8f9fa',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading() }
+    });
+
+    const formData = new FormData(this);
+
+    // Enviar el archivo en segundo plano
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(async response => {
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Si el backend devolvió un error 
+            Swal.fire({
+                title: 'Error de Sellado',
+                text: data.error || 'Ocurrió un problema inesperado.',
+                icon: 'error',
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#dc3545'
+            });
+            return;
+        }
+
+        // Éxito
+        Swal.fire({
+            title: '¡Bóveda Sellada!',
+            text: data.message,
+            icon: 'success',
+            background: '#212529', color: '#f8f9fa', confirmButtonColor: '#198754'
+        }).then(() => {
+            window.location.href = "{{ url_for('main.dashboard') }}";
+        });
+    })
+    .catch(error => {
+        Swal.fire('Error de red', 'No se pudo contactar con el servidor.', 'error');
+    });
+});
+</script>
+{% endblock %}
