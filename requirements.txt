@@ -1,3 +1,4 @@
-cffi==2.0.0
-cryptography==46.0.5
-pycparser==3.0
+coincurve==21.0.0
+cryptography==46.0.6
+eciespy==0.4.6
+eth-keys==0.7.0
