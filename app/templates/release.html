@@ -93,16 +93,30 @@ document.getElementById('releaseForm').addEventListener('submit', function(e) {
         body: formData
     })
     .then(async response => {
+        // ERROR (Contraseña incorrecta, firma inválida, etc.)
         if (!response.ok) {
+            let errorMsg = "Ocurrió un error al procesar la solicitud.";
+            try {
+                // leer el JSON de error que manda Flask
+                const data = await response.json();
+                if (data.error) {
+                    errorMsg = data.error;
+                }
+            } catch (e) {
+                // Si por alguna razón Flask no manda JSON, usamos texto plano
+                errorMsg = await response.text() || errorMsg;
+            }
+
             Swal.fire({
                 title: 'Acceso Denegado',
-                text: 'La contraseña es incorrecta.',
+                text: errorMsg,
                 icon: 'error',
                 background: '#212529', color: '#f8f9fa', confirmButtonColor: '#dc3545'
             });
             return;
         }
 
+        // Descarga de archivo
         const disposition = response.headers.get('Content-Disposition');
         
         if (disposition && disposition.includes('attachment')) {
@@ -128,20 +142,20 @@ document.getElementById('releaseForm').addEventListener('submit', function(e) {
                 title: '¡Bóveda Abierta!',
                 text: 'Se alcanzó el umbral. El archivo ha sido descifrado y descargado en tu dispositivo.',
                 icon: 'success',
-                timer:4000,
+                timer: 4500,
                 timerProgressBar: true,
                 background: '#212529', color: '#f8f9fa', confirmButtonColor: '#198754'
             }).then(() => {
                 window.location.href = "{{ url_for('main.trustee_dashboard') }}";
             });
-
+        // Token liberado pero faltan firmas
         } else {
             const data = await response.json();
             Swal.fire({
                 title: 'Token Liberado',
                 text: data.message,
                 icon: 'success',
-                timer:4000,
+                timer: 4000,
                 timerProgressBar: true,
                 background: '#212529', color: '#f8f9fa', confirmButtonColor: '#198754'
             }).then(() => {

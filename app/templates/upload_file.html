@@ -37,10 +37,15 @@
                         <small class="text-muted d-flex gap-2">
                             <i class="bi bi-lock-fill mt-1"></i>
                             <span>
-                                <strong>Seguridad en reposo:</strong> Tu archivo será cifrado localmente en el servidor usando AES-GCM antes de ser almacenado. El sistema generará una bóveda (.vault) inaccesible sin los tokens de recuperación.
+                                <strong>Seguridad en reposo:</strong> Tu archivo será cifrado localmente (AES-GCM) y firmado digitalmente con tu llave privada (Ed25519). El sistema generará una bóveda (.vault) a prueba de manipulaciones, garantizando tu autoría y haciéndola inaccesible sin los tokens de tus fiduciarios.
                             </span>
                         </small>
                     </div>
+
+                    <div class="mb-3">
+                            <label for="password" class="form-label">Contraseña (Para firmar digitalmente el archivo):</label>
+                            <input type="password" class="form-control" name="password" id="password" required>
+                        </div>
                     
                     <div class="d-grid gap-3 d-md-flex justify-content-md-end mt-5">
                         <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-light px-4">
