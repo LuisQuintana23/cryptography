@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Inicio - Proyecto Vault{% endblock %}
+
+{% block content %}
+<div class="p-5 mb-4 bg-body-tertiary rounded-3 text-center border border-secondary shadow-sm">
+    <div class="container-fluid py-5">
+        <h1 class="display-5 fw-bold mb-3">Bienvenido a</h1>
+        <img src="{{ url_for('static', filename='logo_completo.png') }}" alt="Logo TrustSafe" width="150" height="150" class="me-2 rounded">
+        <br><br>
+        <p class="col-md-8 mx-auto fs-5 text-muted">
+            Tu bóveda digital de máxima seguridad para el resguardo de información personal y gestión de herencia digital.
+        </p>
+        
+        <div class="mt-5">
+            {% if 'usuario' in session %}
+                <div class="alert alert-success d-inline-block px-4" role="alert">
+                    Estás logueado de forma segura como: <strong>{{ session['usuario'] }}</strong>
+                </div>
+                <br>
+                <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary btn-lg mt-3 px-5">Ir a mi Bóveda (Dashboard)</a>
+            {% else %}
+                <div class="alert alert-secondary d-inline-block px-4" role="alert">
+                    Estado: <strong>Desconectado</strong>. <br>Por favor, autentícate para continuar.
+                </div>
+                <br>
+                <a href="{{ url_for('main.login') }}" class="btn btn-primary btn-lg mt-3 mx-2">Iniciar Sesión</a>
+                <button class="btn btn-outline-light btn-lg mt-3 mx-2">Crear Cuenta</button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

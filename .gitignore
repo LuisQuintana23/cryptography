@@ -1,9 +1,41 @@
-# VSCode
-.vscode/
-*.code-workspace
-
-# macOS
-.DS_Store
-
-# python
+# =========================
+# Entornos Virtuales
+# =========================
+venv/
+env/
 .venv/
+
+# =========================
+# Archivos compilados de Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# Datos sensibles de la App
+# =========================
+# Ignorar la base de datos local SQLite
+*.db
+*.sqlite3
+instance/
+
+# Ignorar los archivos físicos de la bóveda
+vault_storage/
+*.vault
+
+# Ignorar las identidades descargadas por accidente en la raíz
+identity_*.json
+
+# =========================
+# Variables de entorno
+# =========================
+.env
+.flaskenv
+
+# =========================
+# Archivos de IDE y OS
+# =========================
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Panel de Fiduciario - Proyecto Vault{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-secondary pb-3">
+    <div>
+        <h2 class="fw-bold mb-1">
+            <i class="bi bi-people-fill text-info me-2"></i>Panel de Fiduciario
+        </h2>
+        <p class="text-muted mb-0">Gestión de fragmentos criptográficos de recuperación asignados a ti.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-light btn-sm d-flex align-items-center gap-2">
+            <i class="bi bi-arrow-left"></i> Volver a mi Bóveda
+        </a>
+    </div>
+</div>
+
+<h4 class="mb-4">Documentos bajo tu resguardo</h4>
+
+{% if shares %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-5">
+        {% for share in shares %}
+        <div class="col">
+            <div class="card bg-dark border-secondary h-100 shadow-sm">
+                
+                <div class="card-header border-secondary d-flex align-items-center gap-2 py-3">
+                    <i class="bi bi-file-earmark-lock2 text-light fs-5"></i>
+                    <h5 class="card-title mb-0 text-truncate" title="{{ share.document.filename }}">
+                        {{ share.document.filename }}
+                    </h5>
+                </div>
+                
+                <div class="card-body">
+                    <div class="mb-2 text-muted small">
+                        <i class="bi bi-person-badge me-1"></i> Propietario:
+                        <strong class="text-light fs-6 d-block">{{ share.document.owner.username }}</strong>
+                    </div>
+                    <div class="text-muted small mb-3">
+                        <i class="bi bi-calendar3 me-1"></i> Fecha de sellado:
+                        <span class="text-light d-block">{{ share.document.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
+                </div>
+                
+                <div class="card-footer border-secondary bg-transparent p-3">
+                    {% if share.plain_fragment %}
+                        <button class="btn btn-success w-100 d-flex align-items-center justify-content-center gap-2 shadow-sm disabled" aria-disabled="true">
+                            <i class="bi bi-check-circle-fill"></i> Token Liberado
+                        </button>
+                    {% else %}
+                        <a href="{{ url_for('main.release_share', share_id=share.id) }}" class="btn btn-warning w-100 d-flex align-items-center justify-content-center gap-2 shadow-sm fw-bold text-dark">
+                            <i class="bi bi-unlock-fill"></i> Liberar mi Token
+                        </a>
+                    {% endif %}
+                </div>
+                
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-dark border-secondary d-flex align-items-center gap-3 py-4 mb-5" role="alert">
+        <i class="bi bi-info-circle fs-3 text-muted"></i>
+        <div>
+            <h5 class="alert-heading mb-1 text-light">Bóveda vacía</h5>
+            <p class="mb-0 text-muted">No tienes fragmentos de llaves asignados a tu cuenta en este momento.</p>
+        </div>
+    </div>
+{% endif %}
+
+<div class="card bg-dark border-info shadow-sm mt-4">
+    <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between p-4 gap-4">
+        <div>
+            <h4 class="card-title text-info d-flex align-items-center gap-2">
+                <i class="bi bi-person-vcard"></i> Tu Identidad como Fiduciario
+            </h4>
+            <p class="card-text text-muted mb-0">
+                Como fiduciario, posees fragmentos de llaves de otros usuarios. Para garantizar que puedas ayudarlos en el futuro, descarga tu archivo de identidad. <strong>Este archivo es vital para la recuperación offline.</strong>
+            </p>
+        </div>
+        <div class="flex-shrink-0">
+            <a href="{{ url_for('main.download_identity') }}" class="btn btn-info text-dark fw-bold px-4 py-2 d-flex align-items-center gap-2 shadow-sm">
+                <i class="bi bi-download"></i> Descargar Identidad
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Subir a la Bóveda</title>
+</head>
+<body>
+    <h2>Sellar un nuevo documento</h2>
+    <p>Fiduciarios disponibles en el sistema: {{ trustees_count }}</p>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <label for="file">Selecciona un archivo (PDF, TXT, etc.):</label><br><br>
+        <input type="file" name="file" required><br><br>
+        <button type="submit">Cifrar y Sellar Bóveda</button>
+    </form>
+    
+    <br>
+    <a href="{{ url_for('main.dashboard') }}">Volver al Dashboard</a>
+</body>
+</html>

@@ -1,0 +1,83 @@
+flowchart TB
+  %% =========
+  %% Clients
+  %% =========
+  subgraph Clients["Clients (Browser)"]
+    OwnerUI["Owner UI<br/>/dashboard /upload /download_vault /download_identity"]
+    TrusteeUI["Trustee UI<br/>/trustee_dashboard /release/&lt;share_id&gt; /download_identity"]
+  end
+
+  %% =========
+  %% Flask App
+  %% =========
+  subgraph Flask["Flask App (app/)"]
+    Routes["routes.py (Blueprint)"]
+    Models["models.py (SQLAlchemy Models)"]
+    DBExt["extensions.py (db)"]
+    Config["config.py (SECRET_KEY, SQLite, UPLOAD_FOLDER)"]
+
+    CryptoD2["crypto_d2.py<br/>SecureVaultCrypto<br/>AES-GCM + PBKDF2 wrap/unwrap"]
+    Utils["utils.py<br/>Shamir split/combine"]
+    ECIES["ECIES (eciespy)<br/>encrypt/decrypt shares"]
+    CryptoD3["crypto_d3.py<br/>SecureVaultHybridCrypto<br/>keypair generation (secp256k1)"]
+  end
+
+  %% =========
+  %% Storage
+  %% =========
+  subgraph Storage["Storage"]
+    SQLite[(SQLite<br/>secure_vault.db)]
+    VaultFS[("vault_storage/<filename>.vault<br/>JSON container")]
+  end
+
+  %% =========
+  %% Flows
+  %% =========
+  OwnerUI --> Routes
+  TrusteeUI --> Routes
+
+  Routes --> Models
+  Models --> DBExt
+  DBExt --> SQLite
+
+  %% Seal document
+  Routes -- "/upload: read file bytes" --> CryptoD2
+  CryptoD2 -- "encrypt_file -> (file_key, nonce, ciphertext, aad)" --> Routes
+  Routes -- "split file_key (t-of-n, 50%+1)" --> Utils
+  Utils -- "shares: idx:data" --> Routes
+  Routes -- "encrypt each share with trustee public key" --> ECIES
+  Routes -- "write .vault JSON (metadata, recipients, ciphertext)" --> VaultFS
+  Routes -- "persist Document + Share rows" --> SQLite
+
+  %% Release / recover
+  Routes -- "/release: unwrap trustee private key (password)" --> CryptoD2
+  Routes -- "ECIES decrypt share" --> ECIES
+  Routes -- "store plain_fragment" --> SQLite
+  Routes -- "if threshold met: reconstruct file_key" --> Utils
+  Routes -- "read .vault JSON" --> VaultFS
+  Routes -- "decrypt_file(file_key, nonce, ciphertext, aad)" --> CryptoD2
+  Routes -- "send_file: decrypted original" --> TrusteeUI
+
+  %% Identity export
+  Routes -- "/download_identity: export public + wrapped private key" --> OwnerUI
+  Routes -- "/download_identity: export public + wrapped private key" --> TrusteeUI
+
+  %% Init DB / key provisioning
+  CryptoD3 -- "generate_keypair" --> Routes
+  CryptoD3 -- "generate_keypair" --> SQLite
+
+  %% =========
+  %% Styling
+  %% =========
+  classDef clientStyle fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000
+  classDef flaskStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  classDef cryptoStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
+  classDef storageStyle fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#000
+  classDef routeStyle fill:#e0f2f1,stroke:#004d40,stroke-width:2px,color:#000
+  classDef dbStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+
+  class OwnerUI,TrusteeUI clientStyle
+  class Routes,Models,DBExt,Config routeStyle
+  class CryptoD2,CryptoD3,ECIES,Utils cryptoStyle
+  class SQLite,VaultFS storageStyle
+  class Flask flaskStyle

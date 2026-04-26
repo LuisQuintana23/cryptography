@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Liberar Token - Proyecto Vault{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-12 col-md-8 col-lg-6">
+
+        <div class="mb-4 text-center">
+            <h2 class="fw-bold text-danger">
+                <i class="bi bi-unlock-fill me-2"></i>Liberar Token
+            </h2>
+            <p class="text-muted">Autorización criptográfica de fragmento de recuperación</p>
+        </div>
+
+        <div class="card bg-dark border-danger shadow-lg">
+            <div class="card-body p-4 p-md-5">
+
+                <div class="alert alert-warning d-flex align-items-start gap-3 mb-4 shadow-sm" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill fs-2 mt-1"></i>
+                    <div>
+                        <h5 class="alert-heading fw-bold mb-2 text-white">Atención Fiduciario</h5>
+                        <p class="mb-2 text-white">
+                            Estás a punto de aplicar tu llave privada para descifrar tu fragmento del documento:
+                            <br>
+                            <strong class="fs-5">{{ document.filename }}</strong>
+                        </p>
+                        <hr class="border-warning opacity-75">
+                        <p class="mb-0 small text-white">
+                            Solo debes realizar esta acción si el propietario (<strong>{{ document.owner.username }}</strong>) ha fallecido o si existe una justificación legal válida. Si con tu token se alcanza el umbral necesario (50% + 1), <strong>el archivo original se descifrará y descargará automáticamente.</strong>
+                        </p>
+                    </div>
+                </div>
+
+                {% if error %}
+                    <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                        <div>{{ error }}</div>
+                    </div>
+                {% endif %}
+
+                <form method="POST" id="releaseForm">
+                    
+                    <div class="mb-4">
+                        <label for="password" class="form-label text-light fw-bold">Confirma tu identidad</label>
+                        <p class="text-muted small mb-2">Para autorizar la operación, ingresa tu contraseña maestra de fiduciario.</p>
+                        
+                        <div class="input-group input-group-lg">
+                            <span class="input-group-text bg-secondary border-secondary text-light">
+                                <i class="bi bi-key-fill"></i>
+                            </span>
+                            <input type="password" class="form-control bg-dark border-secondary text-light" id="password" name="password" placeholder="Tu contraseña" required autofocus>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-3 d-md-flex justify-content-md-end mt-5">
+                        <a href="{{ url_for('main.trustee_dashboard') }}" class="btn btn-outline-light px-4">
+                            Cancelar
+                        </a>
+                        <button type="submit" class="btn btn-danger px-4 d-flex align-items-center justify-content-center gap-2 shadow-sm fw-bold">
+                            <i class="bi bi-shield-slash-fill"></i> Confirmar y Liberar
+                        </button>
+                    </div>
+                    
+                </form>
+
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %} 
+{% block scripts %}
+<script>
+document.getElementById('releaseForm').addEventListener('submit', function(e) {
+    e.preventDefault(); // Detenemos la recarga de la página
+
+    // Alerta de "Procesando"
+    Swal.fire({
+        title: 'Descifrando Bóveda',
+        text: 'Aplicando tu llave criptográfica. Por favor espera...',
+        icon: 'info',
+        background: '#212529', color: '#f8f9fa',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading() }
+    });
+
+    const formData = new FormData(this);
+
+    // Enviamos la petición al backend en segundo plano
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(async response => {
+        if (!response.ok) {
+            Swal.fire({
+                title: 'Acceso Denegado',
+                text: 'La contraseña es incorrecta.',
+                icon: 'error',
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#dc3545'
+            });
+            return;
+        }
+
+        const disposition = response.headers.get('Content-Disposition');
+        
+        if (disposition && disposition.includes('attachment')) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            
+            let filename = "documento_descifrado";
+            const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+            if (filenameMatch && filenameMatch.length === 2) {
+                filename = filenameMatch[1];
+            }
+
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            Swal.fire({
+                title: '¡Bóveda Abierta!',
+                text: 'Se alcanzó el umbral. El archivo ha sido descifrado y descargado en tu dispositivo.',
+                icon: 'success',
+                timer:4000,
+                timerProgressBar: true,
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#198754'
+            }).then(() => {
+                window.location.href = "{{ url_for('main.trustee_dashboard') }}";
+            });
+
+        } else {
+            const data = await response.json();
+            Swal.fire({
+                title: 'Token Liberado',
+                text: data.message,
+                icon: 'success',
+                timer:4000,
+                timerProgressBar: true,
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#198754'
+            }).then(() => {
+                window.location.href = "{{ url_for('main.trustee_dashboard') }}";
+            });
+        }
+    })
+    .catch(error => {
+        Swal.fire('Error de red', 'No se pudo contactar con el servidor.', 'error');
+    });
+});
+</script>
+{% endblock %}

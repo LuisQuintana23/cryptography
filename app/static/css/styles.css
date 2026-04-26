@@ -1,0 +1,100 @@
+/* static/css/styles.css */
+
+:root {
+    /* Paleta principal: Tonos Ámbar/Dorado sobre fondo oscuro */
+    --vault-primary: #e6b31e;       /* Ámbar vibrante */
+    --vault-primary-hover: #c49615; /* Ámbar más oscuro para el hover */
+    --vault-bg-dark: #121212;
+    --vault-card-bg: #1e1e1e;
+    --vault-border: #333333;
+}
+
+body {
+    background-color: var(--vault-bg-dark);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+/* SOBRESCRITURA DE BOTONES BOOTSTRAP */
+
+/* Botón Primario (El nuevo Ámbar) */
+.btn-primary {
+    background-color: var(--vault-primary);
+    border-color: var(--vault-primary);
+    color: #121212; /* Texto oscuro para máximo contraste y legibilidad */
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease; /* Animación suave */
+}
+
+/* Efecto al pasar el mouse por encima */
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background-color: var(--vault-primary-hover) !important;
+    border-color: var(--vault-primary-hover) !important;
+    color: #000 !important;
+    transform: translateY(-2px); /* El botón se "levanta" ligeramente */
+    box-shadow: 0 4px 15px rgba(230, 179, 30, 0.3); /* Resplandor dorado */
+}
+
+/* Mejoras al botón Success (Verde) */
+.btn-success {
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+.btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+}
+
+/* Mejoras al botón Info (Usado para el Fiduciario) */
+.btn-info {
+    color: #fff;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+.btn-info:hover {
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
+}
+
+/* MEJORAS DE INTERFAZ (UI) */
+
+/* Barra de navegación */
+.navbar {
+    background-color: #0a0a0a !important;
+    border-bottom: 1px solid var(--vault-border) !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.navbar-brand {
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+/* Tarjetas y Contenedores (Cards) */
+.card, .vault-item, .warning-box, div[style*="background-color: #e9ecef"], div[style*="background-color: #d1ecf1"] {
+    background-color: var(--vault-card-bg) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 8px !important;
+    color: #e0e0e0 !important;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+/* Efecto hover para los elementos de la lista de bóvedas */
+.vault-item:hover {
+    transform: translateX(5px);
+    border-left: 3px solid var(--vault-primary) !important;
+}
+
+/* Enlaces generales */
+a {
+    color: var(--vault-primary);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+a:hover {
+    color: var(--vault-primary-hover);
+    text-decoration: underline;
+}
