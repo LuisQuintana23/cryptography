@@ -1,14 +1,17 @@
-from flask import Blueprint, render_template, request, redirect, url_for, session, send_file, current_app, jsonify
-import io, os, ecies, json
+from flask import Blueprint, render_template, request, redirect, url_for, session, send_file, current_app, jsonify, flash
+import io, os, ecies, json, time
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from flask import Blueprint, render_template, request, redirect, url_for, session, send_file, current_app, flash
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.exceptions import InvalidSignature, InvalidTag
 # Importaciones locales 
 from extensions import db
 from models import User, Document, Share
 from utils import create_shares, reconstruct_key
 from crypto_d3 import SecureVaultHybridCrypto 
 from crypto_d2 import SecureVaultCrypto
+from crypto_d5_signatures import SecureVaultSignedCrypto
 
 # Blueprint
 bp = Blueprint('main', __name__)
@@ -61,7 +64,10 @@ def upload_file():
         return redirect(url_for('main.login'))
         
     owner = User.query.filter_by(username=session['usuario']).first()
-    trustees = User.query.filter(User.id != owner.id).all()
+    trustees = User.query.filter(
+        User.id != owner.id,
+        User.is_trustee == True
+    ).all()
 
     if request.method == 'POST':
         if 'file' not in request.files:
@@ -71,16 +77,90 @@ def upload_file():
         if file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
 
+        # Se solicita contraseña para desbloquear la fimra (Ed25519)
+        password = request.form.get('password')
+        if not password:
+            return jsonify({"error": "Se requiere tu contraseña para firmar el documento."}), 400
+        
         try:
-
+            # Desbloquear el llavero privado del owner
+            crypto_sym = SecureVaultCrypto()
+            try:
+                unwrapped_keystore = crypto_sym.unwrap_private_key(
+                    owner.encrypted_private_key, 
+                    owner.key_salt, 
+                    owner.key_nonce, 
+                    password
+                )
+                # Separar llave de cifrado (secp256k1) y llave de firma (Ed25519)
+                owner_enc_priv, owner_sign_priv = unwrapped_keystore.split(':')
+            except ValueError:
+                return jsonify({"error": "Contraseña incorrecta. No se pudo autorizar la firma."}), 401
+            
             plaintext = file.read()
             filename = secure_filename(file.filename)
             
-            # Cifrar con D2
-            crypto_sym = SecureVaultCrypto()
-            file_key, nonce, ciphertext, aad = crypto_sym.encrypt_file(plaintext, filename)
+            # Generar llaves y nonces simétricos (D5 logic)
+            vault_signed = SecureVaultSignedCrypto()
+            file_key = vault_signed.generate_symmetric_key()
+            nonce = vault_signed.generate_nonce()
+            aesgcm = AESGCM(file_key)
             
-            # Guardar en Base de Datos (solo metadatos básicos para la UI)
+            # Dividir llave (Shamir) y cifrar fragmentos para fiduciarios
+            total_shares = len(trustees)
+            if total_shares < 2:
+                return jsonify({"error": "Se requieren al menos 2 fiduciarios."}), 400
+                
+            threshold = (total_shares // 2) + 1
+            shares = create_shares(file_key, threshold, total_shares)
+
+            recipients_data = []
+            for i, trustee in enumerate(trustees):
+                share_string = shares[i]
+                # Ciframos el fragmento con la llave pública de CIFRADO del trustee
+                encrypted_share = ecies.encrypt(trustee.public_key, share_string.encode('utf-8'))
+                
+                recipients_data.append({
+                    "id": trustee.public_key, # Usamos la pubkey como ID para coincidir con D5
+                    "trustee_id": trustee.id,
+                    "trustee_username": trustee.username,
+                    "encrypted_share": encrypted_share.hex() # Se guarda el fragmento de Shamir
+                })
+
+            # Empaquetar Metadatos y Crear AAD
+            metadata = {
+                "filename": filename,
+                "nonce": nonce.hex(),
+                "symmetric_algorithm": "AES-GCM-256",
+                "asymmetric_algorithm": "ECIES-secp256k1",
+                "signature_algorithm": "Ed25519",
+                "creation_timestamp": time.time()
+            }
+
+            aad_dict = {"metadata": metadata, "recipients": recipients_data}
+            aad = json.dumps(aad_dict, sort_keys=True).encode('utf-8')
+
+            # Cifrado final del archivo
+            ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext, aad)
+            ciphertext = ciphertext_with_tag[:-16]
+            tag = ciphertext_with_tag[-16:]
+
+            # Construir contenedor base
+            vault_container = {
+                "metadata": metadata,
+                "recipients": recipients_data,
+                "ciphertext": ciphertext.hex(),
+                "tag": tag.hex()
+            }
+
+            # FIRMAR EL CONTENEDOR (D5)
+            data_to_sign = vault_signed._get_data_to_sign(vault_container)
+            priv_key_obj = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(owner_sign_priv))
+            signature = priv_key_obj.sign(data_to_sign)
+
+            vault_container["signature"] = signature.hex()
+            vault_container["signer_id"] = owner.signing_public_key
+
             vault_filename = f"{filename}.vault"
             storage_path = os.path.join(current_app.config['UPLOAD_FOLDER'], vault_filename)
             
@@ -88,61 +168,28 @@ def upload_file():
                 owner_id=owner.id,
                 filename=filename,
                 storage_path=storage_path,
-                # Ya no es estrictamente necesario guardar nonce y aad en la BD, 
-                # pero los dejamos por si acaso.
                 nonce=nonce.hex(),
-                aad=aad.hex() if isinstance(aad, bytes) else aad 
+                aad=aad.hex() 
             )
             db.session.add(new_doc)
             db.session.flush()
 
-            # Dividir llave (Shamir)
-            total_shares = len(trustees)
-            if total_shares < 2:
-                return "Se requieren al menos 2 fiduciarios.", 400
-                
-            threshold = (total_shares // 2) + 1
-            shares = create_shares(file_key, threshold, total_shares)
-
-            # Repartir fragmentos y armar el JSON del contenedor
-            recipients_data = []
-            for i, trustee in enumerate(trustees):
-                share_string = shares[i]
-                encrypted_share = ecies.encrypt(trustee.public_key, share_string.encode('utf-8'))
-                
-                # Guardamos en la BD
+            # Guardar fragmentos en la BD
+            for recipient in recipients_data:
                 new_share = Share(
                     document_id=new_doc.id,
-                    trustee_id=trustee.id,
-                    encrypted_fragment=encrypted_share.hex()
+                    trustee_id=recipient["trustee_id"],
+                    encrypted_fragment=recipient["encrypted_share"]
                 )
                 db.session.add(new_share)
-                
-                # Añadimos al JSON
-                recipients_data.append({
-                    "trustee_id": trustee.id,
-                    "trustee_username": trustee.username,
-                    "encrypted_share": encrypted_share.hex()
-                })
-
-            # Escribir el contenedor portátil (.vault)
-            vault_container = {
-                "metadata": {
-                    "filename": filename,
-                    "nonce": nonce.hex(),
-                    "aad": aad.hex() if isinstance(aad, bytes) else aad,
-                    "algorithm": "AES-GCM-256 + Shamir + ECIES"
-                },
-                "recipients": recipients_data,
-                "ciphertext": ciphertext.hex() # Se guarda en hexadecimal para ser compatible con JSON
-            }
 
             with open(storage_path, "w", encoding="utf-8") as f:
                 json.dump(vault_container, f, indent=4)
+                
             db.session.commit()
             return jsonify({
                 "status": "success", 
-                "message": "El documento ha sido cifrado y la bóveda sellada correctamente."
+                "message": "El documento ha sido cifrado, firmado digitalmente y sellado correctamente."
             }), 200
 
         except Exception as e:
@@ -163,6 +210,7 @@ def trustee_dashboard():
     
     return render_template('trustee_dashboard.html', shares=mis_shares)
 
+# Release para desbloquear documento
 @bp.route('/release/<int:share_id>', methods=['GET', 'POST'])
 def release_share(share_id):
     if 'usuario' not in session:
@@ -172,26 +220,28 @@ def release_share(share_id):
     share = Share.query.get_or_404(share_id)
     doc = share.document
 
-    # Verificamos que el fragmento realmente le pertenezca
     if share.trustee_id != user.id:
         return "Acceso denegado", 403
 
     if request.method == 'POST':
         password = request.form['password']
         crypto_sym = SecureVaultCrypto()
+        vault_signed = SecureVaultSignedCrypto()
         
         try:
-            # Desbloquear llave privada del fiduciario
-            priv_hex = crypto_sym.unwrap_private_key(
+            # Desbloquear el Llavero Privado del Fiduciario
+            unwrapped_keystore = crypto_sym.unwrap_private_key(
                 user.encrypted_private_key, 
                 user.key_salt, 
                 user.key_nonce, 
                 password
             )
+            # El fiduciario usa su llave de cifrado (secp256k1) para descifrar el fragmento
+            trustee_enc_priv, _ = unwrapped_keystore.split(':')
             
             # Descifrar el fragmento de Shamir usando ECIES
             encrypted_frag_bytes = bytes.fromhex(share.encrypted_fragment)
-            plain_frag_bytes = ecies.decrypt(priv_hex, encrypted_frag_bytes)
+            plain_frag_bytes = ecies.decrypt(trustee_enc_priv, encrypted_frag_bytes)
             
             # Guardar el fragmento liberado en la BD
             share.plain_fragment = plain_frag_bytes.decode('utf-8')
@@ -200,25 +250,40 @@ def release_share(share_id):
             # Verificar umbral
             total_shares_count = Share.query.filter_by(document_id=doc.id).count()
             threshold = (total_shares_count // 2) + 1
-            
             liberados = Share.query.filter(Share.document_id == doc.id, Share.plain_fragment != None).all()
             
             if len(liberados) >= threshold:
-                # Reconstruir y descifrar
+                # Leer el contenedor
+                with open(doc.storage_path, "r", encoding="utf-8") as f:
+                    vault_container = json.load(f)
+                
+                # Verificación de firma digital (Antes de descifrar)
+                if "signature" not in vault_container or "signer_id" not in vault_container:
+                    return jsonify({"error": "Rechazado: El contenedor carece de firma digital."}), 400
+                    
+                data_to_verify = vault_signed._get_data_to_sign(vault_container)
+                try:
+                    pub_key_obj = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(vault_container["signer_id"]))
+                    pub_key_obj.verify(bytes.fromhex(vault_container["signature"]), data_to_verify)
+                except InvalidSignature:
+                    return jsonify({"error": "ALERTA: Firma digital inválida. El documento ha sido modificado o falsificado."}), 400
+                
+                # Reconstruir llave y descifrar (Flujo Seguro)
                 shares_list = [s.plain_fragment for s in liberados]
                 file_key = reconstruct_key(shares_list)
                 
-                with open(doc.storage_path, "r", encoding="utf-8") as f:
-                    vault_container = json.load(f)
-                    
-                file_nonce = bytes.fromhex(vault_container["metadata"]["nonce"])
-                file_aad = bytes.fromhex(vault_container["metadata"]["aad"])
-                ciphertext = bytes.fromhex(vault_container["ciphertext"])
+                nonce = bytes.fromhex(vault_container["metadata"]["nonce"])
+                aad_dict = {"metadata": vault_container["metadata"], "recipients": vault_container["recipients"]}
+                aad = json.dumps(aad_dict, sort_keys=True).encode('utf-8')
+                ciphertext_with_tag = bytes.fromhex(vault_container["ciphertext"]) + bytes.fromhex(vault_container["tag"])
                 
-                plaintext = crypto_sym.decrypt_file(file_key, file_nonce, ciphertext, file_aad)
+                aesgcm = AESGCM(file_key)
+                try:
+                    plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
+                except InvalidTag:
+                    return jsonify({"error": "ALERTA: Integridad simétrica comprometida."}), 400
                 
                 original_filename = vault_container["metadata"]["filename"]
-                
                 # Retornar el archivo
                 return send_file(
                     io.BytesIO(plaintext),
@@ -228,12 +293,14 @@ def release_share(share_id):
                 )
             else:
                 # Si faltanm tokens regresa json
-                mensaje = f"Se han reunido {len(liberados)} de {threshold} tokens necesarios."
+                mensaje = f"Firma válida. Se han reunido {len(liberados)} de {threshold} tokens necesarios."
                 return jsonify({"status": "success", "message": mensaje}), 200
                 
-        except Exception as e:
+        except ValueError as e:
             # SI LA CONTRASEÑA ES INCORRECTA, RETORNAMOS UN ERROR JSON
-            return jsonify({"error": "Error criptográfico o contraseña incorrecta."}), 400
+            return jsonify({"error": f"Error criptográfico o contraseña incorrecta: {str(e)}"}), 400
+        except Exception as e:
+            return jsonify({"error": f"Error interno: {str(e)}"}), 500
 
     return render_template('release.html', document=doc)
 
