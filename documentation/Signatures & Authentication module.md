@@ -32,3 +32,4 @@ Failing to verify the signature first violates the Cryptographic Doom Principle.
 
 
 ### What happens if metadata is excluded?
+If metadata were excluded from the signature, the system would be highly vulnerable to Context Manipulation attacks. An adversary could intercept the vault and alter the plaintext without breaking the signature on the ciphertext. The advantage of signing the metadata is that it guarantees the context remains completely immutable, effectively closing this attack vector and forcing the system to reject any forged contextual instructions.
