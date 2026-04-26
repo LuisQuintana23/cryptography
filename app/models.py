@@ -6,10 +6,16 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    # Llaves para Confidencialidad (ECIES - secp256k1)
     public_key = db.Column(db.String(255), nullable=True) 
     encrypted_private_key = db.Column(db.Text, nullable=True)
+    # Llaves para Autenticidad (Firmas - Ed25519)
+    signing_public_key = db.Column(db.String(255), nullable=True)
+    encrypted_signing_private_key = db.Column(db.Text, nullable=True)
+    # Componentes de la KDF compartidos para desbloquear ambas llaves
     key_salt = db.Column(db.String(64), nullable=True)
     key_nonce = db.Column(db.String(64), nullable=True)
+    is_trustee = db.Column(db.Boolean, default=False)
 
 class Document(db.Model):
     __tablename__ = 'documents'

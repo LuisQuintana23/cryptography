@@ -10,8 +10,10 @@ from routes import bp
 # Importaciones necesarias para inicializar la BD
 from models import User
 from werkzeug.security import generate_password_hash
-from crypto_d3 import SecureVaultHybridCrypto 
+
+# Importaciones del Motor Simétrico (D2) y el Nuevo Motor Híbrido con Firmas (D5)
 from crypto_d2 import SecureVaultCrypto
+from crypto_d5_signatures import SecureVaultSignedCrypto
 
 def create_app():
     """Patrón de Fábrica de Aplicaciones (Application Factory)"""
@@ -29,7 +31,7 @@ def create_app():
 
     # ==========================================
     # COMANDO CLI PARA INICIALIZAR LA BD
-    # usar flask --app app init-db en consola dentro del env para poder crear la BD y limpiarla de ser necesario.
+    # usar flask --app app init-db en consola 
     # ==========================================
     @app.cli.command("init-db")
     def init_db_command():
@@ -38,33 +40,50 @@ def create_app():
         db.create_all()
         
         usuarios_test = [
-            {"u": "admin", "p": "secreto123"},
-            {"u": "trustee1", "p": "clave1"},
-            {"u": "trustee2", "p": "clave2"}
+            {"u": "admin", "p": "secreto123", "trustee": True},
+            {"u": "trustee1", "p": "clave1", "trustee": True},
+            {"u": "trustee2", "p": "clave2", "trustee": True},
+            {"u": "notrustee", "p": "clave3", "trustee": False}, 
         ]
         
-        crypto_asym = SecureVaultHybridCrypto()
-        crypto_sym = SecureVaultCrypto()
+        # Instanciamos los motores criptográficos
+        crypto_sym = SecureVaultCrypto()           # Para envolver las llaves privadas (Keystore)
+        vault_signed = SecureVaultSignedCrypto()   # Para generar las llaves D5
 
         for user_data in usuarios_test:
             if not User.query.filter_by(username=user_data["u"]).first():
                 click.echo(f"Creando usuario: {user_data['u']}...")
                 
-                priv_hex, pub_hex = crypto_asym.generate_keypair()
-                wrapped = crypto_sym.wrap_private_key(priv_hex, user_data["p"])
+                # Generar ambas identidades criptográficas
+                enc_priv, enc_pub = vault_signed.generate_encryption_keypair()
+                sign_priv, sign_pub = vault_signed.generate_signing_keypair()
                 
+                # Keystore: Unimos ambas llaves privadas separadas por ":"
+                # Esto evita reutilizar Nonces de AES-GCM y ahorra espacio en la base de datos
+                combined_privates = f"{enc_priv}:{sign_priv}"
+                
+                # Cifrar el llavero completo con la contraseña del usuario
+                wrapped = crypto_sym.wrap_private_key(combined_privates, user_data["p"])
+                
+                # Guardar en Base de Datos
                 new_user = User(
                     username=user_data["u"],
                     password_hash=generate_password_hash(user_data["p"]),
-                    public_key=pub_hex,
+                    
+                    # Llaves Públicas (Visibles para todos)
+                    public_key=enc_pub,
+                    signing_public_key=sign_pub,
+                    # Llavero Privado Cifrado
                     encrypted_private_key=wrapped["encrypted_key"],
                     key_salt=wrapped["salt"],
-                    key_nonce=wrapped["nonce"]
+                    key_nonce=wrapped["nonce"],
+                    # Permisos adicionales del proyecto
+                    is_trustee=user_data["trustee"]
                 )
                 db.session.add(new_user)
         
         db.session.commit()
-        click.echo("Base de datos inicializada y llenada con éxito.")
+        click.echo("Base de datos inicializada y llenada con éxito (Llaves Ed25519 integradas).")
 
     return app
 
