@@ -59,6 +59,7 @@ def logout():
     return redirect(url_for('main.index'))
 
 @bp.route('/upload', methods=['GET', 'POST'])
+@bp.route('/upload', methods=['GET', 'POST'])
 def upload_file():
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
@@ -70,17 +71,43 @@ def upload_file():
     ).all()
 
     if request.method == 'POST':
+        # Fix de validaciones para los archivos subidos.
+        
         if 'file' not in request.files:
-            return jsonify({"error": "No se detectó ningún archivo"}), 400
+            return jsonify({"error": "Petición inválida: No se detectó ningún archivo"}), 400
             
         file = request.files['file']
+        
+        # Validar nombre de archivo (Evitar inyecciones largas o archivos sin nombre)
         if file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
+            
+        filename = secure_filename(file.filename)
+        if not filename or len(filename) > 100:
+            return jsonify({"error": "Nombre de archivo inválido o demasiado largo (máximo 100 caracteres)."}), 400
 
-        # Se solicita contraseña para desbloquear la fimra (Ed25519)
+        # Validar tamaño del archivo (Prevenir DoS por agotamiento de RAM)
+        # Límite en 10 MB
+        MAX_FILE_SIZE = 10 * 1024 * 1024 
+        
+        # Revisamos la cabecera HTTP primero
+        if request.content_length is not None and request.content_length > MAX_FILE_SIZE:
+            return jsonify({"error": "El archivo excede el tamaño máximo permitido (10 MB)."}), 413
+            
+        plaintext = file.read()
+        
+        # Verificamos los bytes reales cargados en memoria
+        if len(plaintext) == 0:
+            return jsonify({"error": "El archivo está vacío."}), 400
+            
+        if len(plaintext) > MAX_FILE_SIZE:
+            return jsonify({"error": "El archivo excede el tamaño máximo permitido (15 MB)."}), 413
+
+        # Validar la contraseña
         password = request.form.get('password')
-        if not password:
-            return jsonify({"error": "Se requiere tu contraseña para firmar el documento."}), 400
+        if not password or len(password) > 128:
+            return jsonify({"error": "La contraseña es requerida y no debe exceder los 128 caracteres."}), 400
+
         
         try:
             # Desbloquear el llavero privado del owner
