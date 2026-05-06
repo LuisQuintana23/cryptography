@@ -286,14 +286,14 @@ def release_share(share_id):
                 
                 # Verificación de firma digital (Antes de descifrar)
                 if "signature" not in vault_container or "signer_id" not in vault_container:
-                    return jsonify({"error": "Rechazado: El contenedor carece de firma digital."}), 400
+                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
                     
                 data_to_verify = vault_signed._get_data_to_sign(vault_container)
                 try:
                     pub_key_obj = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(vault_container["signer_id"]))
                     pub_key_obj.verify(bytes.fromhex(vault_container["signature"]), data_to_verify)
                 except InvalidSignature:
-                    return jsonify({"error": "ALERTA: Firma digital inválida. El documento ha sido modificado o falsificado."}), 400
+                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
                 
                 # Reconstruir llave y descifrar (Flujo Seguro)
                 shares_list = [s.plain_fragment for s in liberados]
@@ -308,7 +308,7 @@ def release_share(share_id):
                 try:
                     plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
                 except InvalidTag:
-                    return jsonify({"error": "ALERTA: Integridad simétrica comprometida."}), 400
+                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
                 
                 original_filename = vault_container["metadata"]["filename"]
                 # Retornar el archivo
