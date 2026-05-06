@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import hmac
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag, InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -176,7 +177,7 @@ class SecureVaultSignedCrypto:
 
         encrypted_file_key_hex = None
         for recipient in container["recipients"]:
-            if self._normalize_pubkey(recipient["id"]) == user_pubkey_hex:
+            if hmac.compare_digest(self._normalize_pubkey(recipient["id"]), user_pubkey_hex):
                 encrypted_file_key_hex = recipient["encrypted_key"]
                 break
 
