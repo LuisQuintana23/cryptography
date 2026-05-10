@@ -40,10 +40,10 @@ def create_app():
         db.create_all()
         
         usuarios_test = [
-            {"u": "admin", "p": "secreto123", "trustee": True},
-            {"u": "trustee1", "p": "clave1", "trustee": True},
-            {"u": "trustee2", "p": "clave2", "trustee": True},
-            {"u": "notrustee", "p": "clave3", "trustee": False}, 
+            {"u": "admin", "p": "secreto123"},
+            {"u": "trustee1", "p": "clave1"},
+            {"u": "trustee2", "p": "clave2"},
+            {"u": "notrustee", "p": "clave3"},
         ]
         
         # Instanciamos los motores criptográficos
@@ -76,9 +76,7 @@ def create_app():
                     # Llavero Privado Cifrado
                     encrypted_private_key=wrapped["encrypted_key"],
                     key_salt=wrapped["salt"],
-                    key_nonce=wrapped["nonce"],
-                    # Permisos adicionales del proyecto
-                    is_trustee=user_data["trustee"]
+                    key_nonce=wrapped["nonce"]
                 )
                 db.session.add(new_user)
         
