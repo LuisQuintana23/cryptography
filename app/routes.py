@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature, InvalidTag
 # Importaciones locales 
 from extensions import db
-from models import User, Document, Share
+from models import User, Document, Share, Vault, VaultTrustee
 from utils import create_shares, reconstruct_key
 from crypto_d3 import SecureVaultHybridCrypto 
 from crypto_d2 import SecureVaultCrypto
@@ -66,8 +66,7 @@ def upload_file():
         
     owner = User.query.filter_by(username=session['usuario']).first()
     trustees = User.query.filter(
-        User.id != owner.id,
-        User.is_trustee == True
+        User.id != owner.id
     ).all()
 
     if request.method == 'POST':
@@ -139,6 +138,27 @@ def upload_file():
                 return jsonify({"error": "Se requieren al menos 2 fiduciarios."}), 400
                 
             threshold = (total_shares // 2) + 1
+
+            # Crear bóveda con owner unificado
+            new_vault = Vault(
+                owner_user_id=owner.id,
+                threshold=threshold,
+                status='active'
+            )
+            db.session.add(new_vault)
+            db.session.flush()
+
+            trustee_memberships = {}
+            for trustee in trustees:
+                membership = VaultTrustee(
+                    vault_id=new_vault.id,
+                    trustee_user_id=trustee.id,
+                    status='active'
+                )
+                db.session.add(membership)
+                db.session.flush()
+                trustee_memberships[trustee.id] = membership.id
+
             shares = create_shares(file_key, threshold, total_shares)
 
             recipients_data = []
@@ -149,7 +169,8 @@ def upload_file():
                 
                 recipients_data.append({
                     "id": trustee.public_key, # Usamos la pubkey como ID para coincidir con D5
-                    "trustee_id": trustee.id,
+                    "trustee_user_id": trustee.id,
+                    "vault_trustee_id": trustee_memberships[trustee.id],
                     "trustee_username": trustee.username,
                     "encrypted_share": encrypted_share.hex() # Se guarda el fragmento de Shamir
                 })
@@ -192,7 +213,8 @@ def upload_file():
             storage_path = os.path.join(current_app.config['UPLOAD_FOLDER'], vault_filename)
             
             new_doc = Document(
-                owner_id=owner.id,
+                vault_id=new_vault.id,
+                owner_user_id=owner.id,
                 filename=filename,
                 storage_path=storage_path,
                 nonce=nonce.hex(),
@@ -205,7 +227,8 @@ def upload_file():
             for recipient in recipients_data:
                 new_share = Share(
                     document_id=new_doc.id,
-                    trustee_id=recipient["trustee_id"],
+                    trustee_user_id=recipient["trustee_user_id"],
+                    vault_trustee_id=recipient["vault_trustee_id"],
                     encrypted_fragment=recipient["encrypted_share"]
                 )
                 db.session.add(new_share)
@@ -233,7 +256,7 @@ def trustee_dashboard():
     user = User.query.filter_by(username=session['usuario']).first()
     
     # Buscar todos los fragmentos asignados a este fiduciario
-    mis_shares = Share.query.filter_by(trustee_id=user.id).all()
+    mis_shares = Share.query.filter_by(trustee_user_id=user.id).all()
     
     return render_template('trustee_dashboard.html', shares=mis_shares)
 
@@ -244,10 +267,10 @@ def release_share(share_id):
         return redirect(url_for('main.login'))
 
     user = User.query.filter_by(username=session['usuario']).first()
-    share = Share.query.get_or_404(share_id)
+    share = db.get_or_404(Share, share_id)
     doc = share.document
 
-    if share.trustee_id != user.id:
+    if share.trustee_user_id != user.id:
         return "Acceso denegado", 403
 
     if request.method == 'POST':
@@ -338,9 +361,9 @@ def download_vault(doc_id):
         return redirect(url_for('main.login'))
         
     user = User.query.filter_by(username=session['usuario']).first()
-    doc = Document.query.get_or_404(doc_id)
+    doc = db.get_or_404(Document, doc_id)
     
-    if doc.owner_id != user.id:
+    if doc.owner_user_id != user.id:
         return "No tienes permiso para descargar este archivo", 403
         
     return send_file(doc.storage_path, as_attachment=True)
