@@ -21,3 +21,9 @@ python app.py
 
 ### Architecture diagram (Mermaid)
 See `app/architecture.mermaid` for the app-level architecture used by the implementation.
+
+### Baseline regression tests
+Run the baseline regression suite before schema/auth refactors:
+```sh
+pytest tests/test_baseline_flows.py -q
+```
