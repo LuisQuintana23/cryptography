@@ -72,10 +72,18 @@ def _upload_sample_vault(test_context, filename: str = "baseline.txt", data: byt
     login_response = _login(client, "admin", "secreto123")
     assert login_response.status_code == 302
 
+    with app.app_context():
+        trustee_ids = [
+            str(user.id)
+            for user in User.query.filter(User.username.in_(["trustee1", "trustee2"])).all()
+        ]
+        assert len(trustee_ids) == 2
+
     response = client.post(
         "/upload",
         data={
             "password": "secreto123",
+            "selected_trustees": trustee_ids,
             "file": (io.BytesIO(data), filename),
         },
         content_type="multipart/form-data",
@@ -147,3 +155,27 @@ def test_trustee_release_threshold_reconstruction_flow(test_context):
     response_2 = client.post(f"/release/{share2_id}", data={"password": "clave2"})
     assert response_2.status_code == 200
     assert "attachment" in response_2.headers.get("Content-Disposition", "")
+
+
+def test_upload_requires_at_least_two_selected_trustees(test_context):
+    client = test_context["client"]
+    app = test_context["app"]
+    login_response = _login(client, "admin", "secreto123")
+    assert login_response.status_code == 302
+
+    with app.app_context():
+        one_trustee = User.query.filter_by(username="trustee1").first()
+        assert one_trustee is not None
+
+    response = client.post(
+        "/upload",
+        data={
+            "password": "secreto123",
+            "selected_trustees": [str(one_trustee.id)],
+            "file": (io.BytesIO(b"sample"), "one-trustee.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "Se requieren al menos 2 fiduciarios" in payload["error"]

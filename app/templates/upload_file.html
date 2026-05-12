@@ -42,6 +42,31 @@
                         </small>
                     </div>
 
+                    <div class="mb-4">
+                        <label class="form-label text-light fw-bold">Selecciona fiduciarios para esta bóveda</label>
+                        <p class="text-muted small mb-2">Debes elegir al menos 2 usuarios existentes.</p>
+                        <div class="border border-secondary rounded p-3" style="max-height: 220px; overflow-y: auto;">
+                            {% if available_trustees %}
+                                {% for trustee in available_trustees %}
+                                <div class="form-check mb-2">
+                                    <input
+                                        class="form-check-input"
+                                        type="checkbox"
+                                        name="selected_trustees"
+                                        value="{{ trustee.id }}"
+                                        id="trustee_{{ trustee.id }}"
+                                    >
+                                    <label class="form-check-label text-light" for="trustee_{{ trustee.id }}">
+                                        {{ trustee.username }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <p class="text-muted mb-0">No hay usuarios disponibles para asignar como fiduciarios.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                             <label for="password" class="form-label">Contraseña (Para firmar digitalmente el archivo):</label>
                             <input type="password" class="form-control" name="password" id="password" required>
