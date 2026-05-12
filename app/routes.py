@@ -65,9 +65,7 @@ def upload_file():
         return redirect(url_for('main.login'))
         
     owner = User.query.filter_by(username=session['usuario']).first()
-    trustees = User.query.filter(
-        User.id != owner.id
-    ).all()
+    available_trustees = User.query.filter(User.id != owner.id).all()
 
     if request.method == 'POST':
         # Fix de validaciones para los archivos subidos.
@@ -132,6 +130,21 @@ def upload_file():
             nonce = vault_signed.generate_nonce()
             aesgcm = AESGCM(file_key)
             
+            selected_trustee_ids_raw = request.form.getlist("selected_trustees")
+            if not selected_trustee_ids_raw:
+                return jsonify({"error": "Debes seleccionar al menos 2 fiduciarios."}), 400
+
+            try:
+                selected_trustee_ids = [int(trustee_id) for trustee_id in selected_trustee_ids_raw]
+            except ValueError:
+                return jsonify({"error": "Selección de fiduciarios inválida."}), 400
+
+            selected_trustee_ids = list(dict.fromkeys(selected_trustee_ids))
+            if owner.id in selected_trustee_ids:
+                return jsonify({"error": "El propietario no puede ser fiduciario de su propia bóveda."}), 400
+
+            trustees = User.query.filter(User.id.in_(selected_trustee_ids)).all()
+
             # Dividir llave (Shamir) y cifrar fragmentos para fiduciarios
             total_shares = len(trustees)
             if total_shares < 2:
@@ -245,7 +258,11 @@ def upload_file():
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": f"Error criptográfico: {str(e)}"}), 500
-    return render_template('upload_file.html', trustees_count=len(trustees))
+    return render_template(
+        'upload_file.html',
+        trustees_count=len(available_trustees),
+        available_trustees=available_trustees
+    )
 
 # Lógica de liberación y decifrado para los usuarios trusted
 @bp.route('/trustee_dashboard')
@@ -255,8 +272,17 @@ def trustee_dashboard():
         
     user = User.query.filter_by(username=session['usuario']).first()
     
-    # Buscar todos los fragmentos asignados a este fiduciario
-    mis_shares = Share.query.filter_by(trustee_user_id=user.id).all()
+    # Buscar solo fragmentos con relación activa en VaultTrustee
+    mis_shares = (
+        Share.query
+        .join(VaultTrustee, Share.vault_trustee_id == VaultTrustee.id)
+        .filter(
+            Share.trustee_user_id == user.id,
+            VaultTrustee.trustee_user_id == user.id,
+            VaultTrustee.status == 'active'
+        )
+        .all()
+    )
     
     return render_template('trustee_dashboard.html', shares=mis_shares)
 
@@ -270,7 +296,13 @@ def release_share(share_id):
     share = db.get_or_404(Share, share_id)
     doc = share.document
 
-    if share.trustee_user_id != user.id:
+    membership = VaultTrustee.query.filter_by(
+        id=share.vault_trustee_id,
+        trustee_user_id=user.id,
+        status='active'
+    ).first()
+
+    if share.trustee_user_id != user.id or membership is None:
         return "Acceso denegado", 403
 
     if request.method == 'POST':
