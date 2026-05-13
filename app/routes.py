@@ -10,7 +10,7 @@ from extensions import db
 from models import User, Document, Share, Vault, VaultTrustee
 from utils import create_shares, reconstruct_key
 from crypto_d3 import SecureVaultHybridCrypto 
-from crypto_d2 import SecureVaultCrypto
+from crypto_d6 import SecureVaultD6Crypto
 from crypto_d5_signatures import SecureVaultSignedCrypto
 
 # Blueprint
@@ -108,13 +108,13 @@ def upload_file():
         
         try:
             # Desbloquear el llavero privado del owner
-            crypto_sym = SecureVaultCrypto()
+            crypto_sym = SecureVaultD6Crypto()
             try:
                 unwrapped_keystore = crypto_sym.unwrap_private_key(
                     owner.encrypted_private_key, 
-                    owner.key_salt, 
-                    owner.key_nonce, 
-                    password
+                    salt_hex=owner.key_salt,
+                    nonce_hex=owner.key_nonce,
+                    password=password
                 )
                 # Separar llave de cifrado (secp256k1) y llave de firma (Ed25519)
                 owner_enc_priv, owner_sign_priv = unwrapped_keystore.split(':')
@@ -144,6 +144,8 @@ def upload_file():
                 return jsonify({"error": "El propietario no puede ser fiduciario de su propia bóveda."}), 400
 
             trustees = User.query.filter(User.id.in_(selected_trustee_ids)).all()
+            if len(trustees) != len(selected_trustee_ids):
+                return jsonify({"error": "Uno o más fiduciarios seleccionados no existen."}), 400
 
             # Dividir llave (Shamir) y cifrar fragmentos para fiduciarios
             total_shares = len(trustees)
@@ -260,9 +262,29 @@ def upload_file():
             return jsonify({"error": f"Error criptográfico: {str(e)}"}), 500
     return render_template(
         'upload_file.html',
-        trustees_count=len(available_trustees),
-        available_trustees=available_trustees
+        trustees_count=len(available_trustees)
     )
+
+
+@bp.route('/api/trustees/resolve', methods=['POST'])
+def resolve_trustee():
+    if 'usuario' not in session:
+        return jsonify({"error": "No autenticado"}), 401
+
+    current_user = User.query.filter_by(username=session['usuario']).first()
+    username = (request.json or {}).get("username", "").strip()
+    if not username:
+        return jsonify({"error": "Debes escribir un username."}), 400
+
+    trustee = (
+        User.query
+        .filter(User.id != current_user.id, User.username.ilike(username))
+        .first()
+    )
+    if not trustee:
+        return jsonify({"error": "No existe un fiduciario con ese username."}), 404
+
+    return jsonify({"id": trustee.id, "username": trustee.username})
 
 # Lógica de liberación y decifrado para los usuarios trusted
 @bp.route('/trustee_dashboard')
@@ -307,16 +329,16 @@ def release_share(share_id):
 
     if request.method == 'POST':
         password = request.form['password']
-        crypto_sym = SecureVaultCrypto()
+        crypto_sym = SecureVaultD6Crypto()
         vault_signed = SecureVaultSignedCrypto()
         
         try:
             # Desbloquear el Llavero Privado del Fiduciario
             unwrapped_keystore = crypto_sym.unwrap_private_key(
                 user.encrypted_private_key, 
-                user.key_salt, 
-                user.key_nonce, 
-                password
+                salt_hex=user.key_salt,
+                nonce_hex=user.key_nonce,
+                password=password
             )
             # El fiduciario usa su llave de cifrado (secp256k1) para descifrar el fragmento
             trustee_enc_priv, _ = unwrapped_keystore.split(':')
@@ -408,14 +430,27 @@ def download_identity():
         
     user = User.query.filter_by(username=session['usuario']).first()
     
+    try:
+        keystore = json.loads(user.encrypted_private_key) if user.encrypted_private_key else {}
+    except (json.JSONDecodeError, TypeError):
+        keystore = {}
+
     # Creamos un archivo de identidad portable
     identity_data = {
         "username": user.username,
         "public_key": user.public_key,
+        "signing_public_key": user.signing_public_key,
         "encrypted_private_key": user.encrypted_private_key,
-        "key_salt": user.key_salt,
-        "key_nonce": user.key_nonce,
-        "kdf_iterations": 480000,
+        "keystore_metadata": {
+            "key_id": keystore.get("key_id"),
+            "kdf_algorithm": (keystore.get("kdf") or {}).get("algorithm", "PBKDF2-HMAC-SHA256"),
+            "kdf_iterations": (keystore.get("kdf") or {}).get("iterations", 480000),
+            "salt": (keystore.get("kdf") or {}).get("salt", user.key_salt),
+            "wrap_algorithm": (keystore.get("wrap") or {}).get("algorithm", "AES-GCM-256"),
+            "nonce": (keystore.get("wrap") or {}).get("nonce", user.key_nonce),
+            "wrap_version": keystore.get("wrap_version", 1),
+            "lifecycle_state": "active",
+        },
         "description": "Este archivo contiene tu llave privada cifrada. No la compartas y recuerda tu contraseña."
     }
     
@@ -427,3 +462,49 @@ def download_identity():
         download_name=f"identity_{user.username}.json",
         mimetype='application/json'
     )
+
+
+@bp.route('/restore_identity', methods=['POST'])
+def restore_identity():
+    if 'usuario' not in session:
+        return jsonify({"error": "No autenticado"}), 401
+
+    if 'identity_file' not in request.files:
+        return jsonify({"error": "No se encontró archivo de identidad."}), 400
+
+    password = request.form.get("password")
+    if not password:
+        return jsonify({"error": "La contraseña es requerida para validar la identidad."}), 400
+
+    file = request.files['identity_file']
+    raw = file.read()
+    if not raw:
+        return jsonify({"error": "El archivo de identidad está vacío."}), 400
+
+    try:
+        identity_data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return jsonify({"error": "El archivo de identidad no es JSON válido."}), 400
+
+    encrypted_private_key = identity_data.get("encrypted_private_key")
+    if not encrypted_private_key:
+        return jsonify({"error": "El archivo no contiene llave privada cifrada."}), 400
+
+    crypto_sym = SecureVaultD6Crypto()
+    try:
+        # Valida contraseña y detecta tampering antes de restaurar
+        crypto_sym.unwrap_private_key(
+            encrypted_private_key,
+            salt_hex=(identity_data.get("keystore_metadata") or {}).get("salt"),
+            nonce_hex=(identity_data.get("keystore_metadata") or {}).get("nonce"),
+            password=password,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+
+    user = User.query.filter_by(username=session['usuario']).first()
+    user.encrypted_private_key = encrypted_private_key
+    user.key_salt = (identity_data.get("keystore_metadata") or {}).get("salt")
+    user.key_nonce = (identity_data.get("keystore_metadata") or {}).get("nonce")
+    db.session.commit()
+    return jsonify({"status": "success", "message": "Identidad restaurada correctamente."}), 200
