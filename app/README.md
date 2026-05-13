@@ -27,3 +27,9 @@ Run the baseline regression suite before schema/auth refactors:
 ```sh
 pytest tests/test_baseline_flows.py -q
 ```
+
+### Key management tests (D6)
+Run keystore hardening tests (metadata, tamper-failure, backup/restore):
+```sh
+pytest tests/test_key_management.py -q
+```
