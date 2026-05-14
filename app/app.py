@@ -1,6 +1,7 @@
 from flask import Flask
 import os
 import click 
+import json
 
 # Importar configuraciones locales
 from extensions import db
@@ -12,7 +13,7 @@ from models import User
 from werkzeug.security import generate_password_hash
 
 # Importaciones del Motor Simétrico (D2) y el Nuevo Motor Híbrido con Firmas (D5)
-from crypto_d2 import SecureVaultCrypto
+from crypto_d6 import SecureVaultD6Crypto
 from crypto_d5_signatures import SecureVaultSignedCrypto
 
 def create_app():
@@ -47,7 +48,7 @@ def create_app():
         ]
         
         # Instanciamos los motores criptográficos
-        crypto_sym = SecureVaultCrypto()           # Para envolver las llaves privadas (Keystore)
+        crypto_sym = SecureVaultD6Crypto()         # Keystore endurecido D6
         vault_signed = SecureVaultSignedCrypto()   # Para generar las llaves D5
 
         for user_data in usuarios_test:
@@ -74,7 +75,7 @@ def create_app():
                     public_key=enc_pub,
                     signing_public_key=sign_pub,
                     # Llavero Privado Cifrado
-                    encrypted_private_key=wrapped["encrypted_key"],
+                    encrypted_private_key=json.dumps(wrapped),
                     key_salt=wrapped["salt"],
                     key_nonce=wrapped["nonce"]
                 )
