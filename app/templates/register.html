@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Crear Cuenta - Proyecto Vault{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-12 col-md-8 col-lg-5">
+        <div class="card bg-dark border-secondary shadow-lg">
+            <div class="card-header border-secondary text-center py-4">
+                <i class="bi bi-person-plus-fill text-info" style="font-size: 3rem;"></i>
+                <h3 class="mb-0 mt-2 fw-bold">Crear Cuenta</h3>
+                <p class="text-muted small mb-0">Registra tu identidad criptográfica</p>
+            </div>
+
+            <div class="card-body p-4">
+                {% if error %}
+                    <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <div>{{ error }}</div>
+                    </div>
+                {% endif %}
+
+                <form method="POST" action="{{ url_for('main.register') }}">
+                    <div class="mb-4">
+                        <label for="username" class="form-label text-light">Usuario</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="username" name="username" minlength="3" maxlength="50" required autofocus>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="password" class="form-label text-light">Contraseña</label>
+                        <input type="password" class="form-control bg-dark border-secondary text-light" id="password" name="password" minlength="8" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="password_confirm" class="form-label text-light">Confirmar contraseña</label>
+                        <input type="password" class="form-control bg-dark border-secondary text-light" id="password_confirm" name="password_confirm" minlength="8" required>
+                    </div>
+
+                    <div class="d-grid mt-4">
+                        <button type="submit" class="btn btn-info text-dark btn-lg fw-bold">Crear cuenta</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card-footer border-secondary text-center py-3">
+                <p class="mb-0 text-muted small">
+                    ¿Ya tienes cuenta? <a href="{{ url_for('main.login') }}" class="text-info text-decoration-none">Inicia sesión</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

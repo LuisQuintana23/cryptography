@@ -15,7 +15,7 @@ if str(APP_DIR) not in sys.path:
 import app as app_module  # noqa: E402
 import config as app_config  # noqa: E402
 from extensions import db  # noqa: E402
-from models import Document, Share, User  # noqa: E402
+from models import Document, Share, User, Vault, VaultTrustee  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -120,6 +120,8 @@ def test_upload_and_seal_vault_container(test_context):
         assert document is not None
         assert Path(document.storage_path).exists()
         assert Share.query.filter_by(document_id=document.id).count() > 0
+        assert document.vault_id is not None
+        assert document.vault.threshold >= 2
 
 
 def test_trustee_release_threshold_reconstruction_flow(test_context):
@@ -179,3 +181,42 @@ def test_upload_requires_at_least_two_selected_trustees(test_context):
     assert response.status_code == 400
     payload = response.get_json()
     assert "Se requieren al menos 2 fiduciarios" in payload["error"]
+
+
+def test_recovery_blocked_when_trustee_policy_becomes_invalid(test_context):
+    client = test_context["client"]
+    app = test_context["app"]
+    document_id = _upload_sample_vault(test_context, filename="policy.txt", data=b"policy-case")
+    _logout(client)
+
+    with app.app_context():
+        trustee1 = User.query.filter_by(username="trustee1").first()
+        trustee2 = User.query.filter_by(username="trustee2").first()
+        assert trustee1 and trustee2
+
+        share1 = Share.query.filter_by(document_id=document_id, trustee_user_id=trustee1.id).first()
+        share2 = Share.query.filter_by(document_id=document_id, trustee_user_id=trustee2.id).first()
+        assert share1 and share2
+        share1_id = share1.id
+        share2_id = share2.id
+
+    # Primer token válido
+    assert _login(client, "trustee1", "clave1").status_code == 302
+    response_1 = client.post(f"/release/{share1_id}", data={"password": "clave1"})
+    assert response_1.status_code == 200
+    _logout(client)
+
+    # Inactivar membresía del segundo trustee y forzar política inválida
+    with app.app_context():
+        share2 = db.session.get(Share, share2_id)
+        membership = db.session.get(VaultTrustee, share2.vault_trustee_id)
+        membership.status = "revoked"
+        doc = db.session.get(Document, document_id)
+        vault = db.session.get(Vault, doc.vault_id)
+        vault.threshold = 2
+        db.session.commit()
+
+    # Debe bloquear recuperación por política inconsistente (<2 activos)
+    assert _login(client, "trustee2", "clave2").status_code == 302
+    response_2 = client.post(f"/release/{share2_id}", data={"password": "clave2"})
+    assert response_2.status_code == 403 or response_2.status_code == 400

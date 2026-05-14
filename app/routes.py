@@ -38,6 +38,47 @@ def login():
 
     return render_template('login.html', error=error)
 
+
+@bp.route('/register', methods=['GET', 'POST'])
+def register():
+    error = None
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        password_confirm = request.form.get('password_confirm') or ''
+
+        if not username or len(username) < 3 or len(username) > 50:
+            error = "El usuario debe tener entre 3 y 50 caracteres."
+        elif not password or len(password) < 8:
+            error = "La contraseña debe tener al menos 8 caracteres."
+        elif password != password_confirm:
+            error = "Las contraseñas no coinciden."
+        elif User.query.filter_by(username=username).first():
+            error = "Ese nombre de usuario ya existe."
+        else:
+            vault_signed = SecureVaultSignedCrypto()
+            crypto_d6 = SecureVaultD6Crypto()
+            enc_priv, enc_pub = vault_signed.generate_encryption_keypair()
+            sign_priv, sign_pub = vault_signed.generate_signing_keypair()
+            combined_privates = f"{enc_priv}:{sign_priv}"
+            wrapped = crypto_d6.wrap_private_key(combined_privates, password)
+
+            new_user = User(
+                username=username,
+                password_hash=generate_password_hash(password),
+                public_key=enc_pub,
+                signing_public_key=sign_pub,
+                encrypted_private_key=json.dumps(wrapped),
+                key_salt=wrapped["salt"],
+                key_nonce=wrapped["nonce"],
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            session['usuario'] = new_user.username
+            return redirect(url_for('main.dashboard'))
+
+    return render_template('register.html', error=error)
+
 @bp.route('/dashboard')
 def dashboard():
     if 'usuario' not in session:
@@ -152,7 +193,7 @@ def upload_file():
             if total_shares < 2:
                 return jsonify({"error": "Se requieren al menos 2 fiduciarios."}), 400
                 
-            threshold = (total_shares // 2) + 1
+            threshold = max(2, (total_shares // 2) + 1)
 
             # Crear bóveda con owner unificado
             new_vault = Vault(
@@ -351,9 +392,16 @@ def release_share(share_id):
             share.plain_fragment = plain_frag_bytes.decode('utf-8')
             db.session.commit()
             
-            # Verificar umbral
-            total_shares_count = Share.query.filter_by(document_id=doc.id).count()
-            threshold = (total_shares_count // 2) + 1
+            # Verificar política de trustees activa del vault
+            active_trustees_count = VaultTrustee.query.filter_by(vault_id=doc.vault_id, status='active').count()
+            if active_trustees_count < 2:
+                return jsonify({"error": "La bóveda tiene menos de 2 fiduciarios activos. No es recuperable."}), 400
+
+            threshold = max(2, doc.vault.threshold)
+            if threshold > active_trustees_count:
+                return jsonify({"error": "La política actual de umbral es inconsistente con fiduciarios activos."}), 400
+
+            # Verificar umbral de tokens liberados
             liberados = Share.query.filter(Share.document_id == doc.id, Share.plain_fragment != None).all()
             
             if len(liberados) >= threshold:
