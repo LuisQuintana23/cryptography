@@ -1,4 +1,6 @@
 import io
+import json
+import os
 import shutil
 import sys
 import tempfile
@@ -6,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT_DIR / "app"
@@ -13,9 +16,8 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 import app as app_module  # noqa: E402
-import config as app_config  # noqa: E402
-from extensions import db  # noqa: E402
-from models import Document, Share, User, Vault, VaultTrustee  # noqa: E402
+from db.extensions import db  # noqa: E402
+from db.models import Document, Share, User, Vault, VaultTrustee  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -25,9 +27,9 @@ def test_context():
     upload_dir = Path(temp_dir.name) / "vault_storage"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    app_config.Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_path}"
-    app_config.Config.UPLOAD_FOLDER = str(upload_dir)
-    app_config.Config.TESTING = True
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+    os.environ["UPLOAD_FOLDER"] = str(upload_dir)
+    os.environ["TESTING"] = "true"
 
     app = app_module.create_app()
     client = app.test_client()
@@ -123,6 +125,25 @@ def test_upload_and_seal_vault_container(test_context):
         assert document.vault_id is not None
         assert document.vault.threshold >= 2
 
+        with open(document.storage_path, encoding="utf-8") as f:
+            vault = json.load(f)
+        # Regresión: el handler de upload no debe consumir el stream antes del cifrado (PDF 0 bytes).
+        assert len(bytes.fromhex(vault["ciphertext"])) > 0
+
+
+def test_same_filename_uploads_do_not_collide(test_context):
+    app = test_context["app"]
+    _upload_sample_vault(test_context, filename="same-name.pdf", data=b"content-a")
+    _upload_sample_vault(test_context, filename="same-name.pdf", data=b"content-b")
+
+    with app.app_context():
+        docs = Document.query.filter_by(filename="same-name.pdf").order_by(Document.id.asc()).all()
+        assert len(docs) == 2
+        assert docs[0].vault_id != docs[1].vault_id
+        assert docs[0].storage_path != docs[1].storage_path
+        assert Path(docs[0].storage_path).exists()
+        assert Path(docs[1].storage_path).exists()
+
 
 def test_trustee_release_threshold_reconstruction_flow(test_context):
     client = test_context["client"]
@@ -157,6 +178,8 @@ def test_trustee_release_threshold_reconstruction_flow(test_context):
     response_2 = client.post(f"/release/{share2_id}", data={"password": "clave2"})
     assert response_2.status_code == 200
     assert "attachment" in response_2.headers.get("Content-Disposition", "")
+    assert len(response_2.data) > 0
+    assert response_2.data == b"threshold-case"
 
 
 def test_upload_requires_at_least_two_selected_trustees(test_context):
