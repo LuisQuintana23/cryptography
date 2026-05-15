@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "secure-digital-document-vault"
+version = "0.1.0"
+description = "Secure document vault with threshold trustee release flow"
+authors = ["d6 team"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = "^3.1.3"
+flask-sqlalchemy = "^3.1.1"
+cryptography = "^46.0.6"
+eciespy = "^0.4.6"
+eth-keys = "^0.7.0"
+pycryptodome = "^3.23.0"
+python-dotenv = "^1.1.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.2"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["legacy", ".git", "__pycache__", ".venv", "node_modules"]
+markers = [
+    "integration: pruebas que requieren app Flask y base de datos",
+]
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
