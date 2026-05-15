@@ -1,20 +1,27 @@
-from flask import Blueprint, render_template, request, redirect, url_for, session, send_file, current_app, jsonify, flash
-import io, os, ecies, json, time
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Blueprint, render_template, request, redirect, url_for, session, send_file, current_app, jsonify
+import io, json, os
+from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.exceptions import InvalidSignature, InvalidTag
 # Importaciones locales 
-from extensions import db
-from models import User, Document, Share, Vault, VaultTrustee
-from utils import create_shares, reconstruct_key
-from crypto_d3 import SecureVaultHybridCrypto 
-from crypto_d6 import SecureVaultD6Crypto
-from crypto_d5_signatures import SecureVaultSignedCrypto
+from db.extensions import db
+from repositories.document_repository import DocumentRepository
+from repositories.share_repository import ShareRepository
+from repositories.user_repository import UserRepository
+from repositories.vault_repository import VaultRepository
+from services.auth_service import register_user, resolve_trustee_by_username
+from services.recovery_service import (
+    decrypt_and_store_share_fragment,
+    release_share_and_maybe_decrypt,
+    validate_identity_payload,
+)
+from services.vault_service import create_vault_document
 
 # Blueprint
 bp = Blueprint('main', __name__)
+user_repository = UserRepository()
+share_repository = ShareRepository()
+vault_repository = VaultRepository()
+document_repository = DocumentRepository()
 
 # Rutas
 @bp.route('/')
@@ -28,7 +35,7 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        user = User.query.filter_by(username=username).first()
+        user = user_repository.find_by_username(username)
 
         if user and check_password_hash(user.password_hash, password):
             session['usuario'] = user.username
@@ -53,27 +60,10 @@ def register():
             error = "La contraseña debe tener al menos 8 caracteres."
         elif password != password_confirm:
             error = "Las contraseñas no coinciden."
-        elif User.query.filter_by(username=username).first():
+        elif user_repository.find_by_username(username):
             error = "Ese nombre de usuario ya existe."
         else:
-            vault_signed = SecureVaultSignedCrypto()
-            crypto_d6 = SecureVaultD6Crypto()
-            enc_priv, enc_pub = vault_signed.generate_encryption_keypair()
-            sign_priv, sign_pub = vault_signed.generate_signing_keypair()
-            combined_privates = f"{enc_priv}:{sign_priv}"
-            wrapped = crypto_d6.wrap_private_key(combined_privates, password)
-
-            new_user = User(
-                username=username,
-                password_hash=generate_password_hash(password),
-                public_key=enc_pub,
-                signing_public_key=sign_pub,
-                encrypted_private_key=json.dumps(wrapped),
-                key_salt=wrapped["salt"],
-                key_nonce=wrapped["nonce"],
-            )
-            db.session.add(new_user)
-            db.session.commit()
+            new_user = register_user(db, username, password, commit=True)
             session['usuario'] = new_user.username
             return redirect(url_for('main.dashboard'))
 
@@ -84,7 +74,7 @@ def dashboard():
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
     
-    user = User.query.filter_by(username=session['usuario']).first()
+    user = user_repository.find_by_username(session['usuario'])
     
     # Pasamos user.owned_documents a la plantilla
     return render_template(
@@ -100,13 +90,12 @@ def logout():
     return redirect(url_for('main.index'))
 
 @bp.route('/upload', methods=['GET', 'POST'])
-@bp.route('/upload', methods=['GET', 'POST'])
 def upload_file():
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
         
-    owner = User.query.filter_by(username=session['usuario']).first()
-    available_trustees = User.query.filter(User.id != owner.id).all()
+    owner = user_repository.find_by_username(session['usuario'])
+    available_trustees = user_repository.list_other_users(owner.id)
 
     if request.method == 'POST':
         # Fix de validaciones para los archivos subidos.
@@ -148,29 +137,6 @@ def upload_file():
 
         
         try:
-            # Desbloquear el llavero privado del owner
-            crypto_sym = SecureVaultD6Crypto()
-            try:
-                unwrapped_keystore = crypto_sym.unwrap_private_key(
-                    owner.encrypted_private_key, 
-                    salt_hex=owner.key_salt,
-                    nonce_hex=owner.key_nonce,
-                    password=password
-                )
-                # Separar llave de cifrado (secp256k1) y llave de firma (Ed25519)
-                owner_enc_priv, owner_sign_priv = unwrapped_keystore.split(':')
-            except ValueError:
-                return jsonify({"error": "Contraseña incorrecta. No se pudo autorizar la firma."}), 401
-            
-            plaintext = file.read()
-            filename = secure_filename(file.filename)
-            
-            # Generar llaves y nonces simétricos (D5 logic)
-            vault_signed = SecureVaultSignedCrypto()
-            file_key = vault_signed.generate_symmetric_key()
-            nonce = vault_signed.generate_nonce()
-            aesgcm = AESGCM(file_key)
-            
             selected_trustee_ids_raw = request.form.getlist("selected_trustees")
             if not selected_trustee_ids_raw:
                 return jsonify({"error": "Debes seleccionar al menos 2 fiduciarios."}), 400
@@ -184,120 +150,26 @@ def upload_file():
             if owner.id in selected_trustee_ids:
                 return jsonify({"error": "El propietario no puede ser fiduciario de su propia bóveda."}), 400
 
-            trustees = User.query.filter(User.id.in_(selected_trustee_ids)).all()
-            if len(trustees) != len(selected_trustee_ids):
-                return jsonify({"error": "Uno o más fiduciarios seleccionados no existen."}), 400
-
-            # Dividir llave (Shamir) y cifrar fragmentos para fiduciarios
-            total_shares = len(trustees)
-            if total_shares < 2:
-                return jsonify({"error": "Se requieren al menos 2 fiduciarios."}), 400
-                
-            threshold = max(2, (total_shares // 2) + 1)
-
-            # Crear bóveda con owner unificado
-            new_vault = Vault(
-                owner_user_id=owner.id,
-                threshold=threshold,
-                status='active'
+            create_vault_document(
+                owner=owner,
+                plaintext=plaintext,
+                source_filename=filename,
+                password=password,
+                selected_trustee_ids=selected_trustee_ids,
+                upload_folder=current_app.config["UPLOAD_FOLDER"],
+                db=db,
             )
-            db.session.add(new_vault)
-            db.session.flush()
-
-            trustee_memberships = {}
-            for trustee in trustees:
-                membership = VaultTrustee(
-                    vault_id=new_vault.id,
-                    trustee_user_id=trustee.id,
-                    status='active'
-                )
-                db.session.add(membership)
-                db.session.flush()
-                trustee_memberships[trustee.id] = membership.id
-
-            shares = create_shares(file_key, threshold, total_shares)
-
-            recipients_data = []
-            for i, trustee in enumerate(trustees):
-                share_string = shares[i]
-                # Ciframos el fragmento con la llave pública de CIFRADO del trustee
-                encrypted_share = ecies.encrypt(trustee.public_key, share_string.encode('utf-8'))
-                
-                recipients_data.append({
-                    "id": trustee.public_key, # Usamos la pubkey como ID para coincidir con D5
-                    "trustee_user_id": trustee.id,
-                    "vault_trustee_id": trustee_memberships[trustee.id],
-                    "trustee_username": trustee.username,
-                    "encrypted_share": encrypted_share.hex() # Se guarda el fragmento de Shamir
-                })
-
-            # Empaquetar Metadatos y Crear AAD
-            metadata = {
-                "filename": filename,
-                "nonce": nonce.hex(),
-                "symmetric_algorithm": "AES-GCM-256",
-                "asymmetric_algorithm": "ECIES-secp256k1",
-                "signature_algorithm": "Ed25519",
-                "creation_timestamp": time.time()
-            }
-
-            aad_dict = {"metadata": metadata, "recipients": recipients_data}
-            aad = json.dumps(aad_dict, sort_keys=True).encode('utf-8')
-
-            # Cifrado final del archivo
-            ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext, aad)
-            ciphertext = ciphertext_with_tag[:-16]
-            tag = ciphertext_with_tag[-16:]
-
-            # Construir contenedor base
-            vault_container = {
-                "metadata": metadata,
-                "recipients": recipients_data,
-                "ciphertext": ciphertext.hex(),
-                "tag": tag.hex()
-            }
-
-            # FIRMAR EL CONTENEDOR (D5)
-            data_to_sign = vault_signed._get_data_to_sign(vault_container)
-            priv_key_obj = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(owner_sign_priv))
-            signature = priv_key_obj.sign(data_to_sign)
-
-            vault_container["signature"] = signature.hex()
-            vault_container["signer_id"] = owner.signing_public_key
-
-            vault_filename = f"{filename}.vault"
-            storage_path = os.path.join(current_app.config['UPLOAD_FOLDER'], vault_filename)
-            
-            new_doc = Document(
-                vault_id=new_vault.id,
-                owner_user_id=owner.id,
-                filename=filename,
-                storage_path=storage_path,
-                nonce=nonce.hex(),
-                aad=aad.hex() 
-            )
-            db.session.add(new_doc)
-            db.session.flush()
-
-            # Guardar fragmentos en la BD
-            for recipient in recipients_data:
-                new_share = Share(
-                    document_id=new_doc.id,
-                    trustee_user_id=recipient["trustee_user_id"],
-                    vault_trustee_id=recipient["vault_trustee_id"],
-                    encrypted_fragment=recipient["encrypted_share"]
-                )
-                db.session.add(new_share)
-
-            with open(storage_path, "w", encoding="utf-8") as f:
-                json.dump(vault_container, f, indent=4)
-                
             db.session.commit()
             return jsonify({
                 "status": "success", 
                 "message": "El documento ha sido cifrado, firmado digitalmente y sellado correctamente."
             }), 200
 
+        except ValueError as e:
+            db.session.rollback()
+            if "Contraseña incorrecta" in str(e):
+                return jsonify({"error": "Contraseña incorrecta. No se pudo autorizar la firma."}), 401
+            return jsonify({"error": str(e)}), 400
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": f"Error criptográfico: {str(e)}"}), 500
@@ -312,16 +184,12 @@ def resolve_trustee():
     if 'usuario' not in session:
         return jsonify({"error": "No autenticado"}), 401
 
-    current_user = User.query.filter_by(username=session['usuario']).first()
+    current_user = user_repository.find_by_username(session['usuario'])
     username = (request.json or {}).get("username", "").strip()
     if not username:
         return jsonify({"error": "Debes escribir un username."}), 400
 
-    trustee = (
-        User.query
-        .filter(User.id != current_user.id, User.username.ilike(username))
-        .first()
-    )
+    trustee = resolve_trustee_by_username(username, current_user.id)
     if not trustee:
         return jsonify({"error": "No existe un fiduciario con ese username."}), 404
 
@@ -333,19 +201,8 @@ def trustee_dashboard():
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
         
-    user = User.query.filter_by(username=session['usuario']).first()
-    
-    # Buscar solo fragmentos con relación activa en VaultTrustee
-    mis_shares = (
-        Share.query
-        .join(VaultTrustee, Share.vault_trustee_id == VaultTrustee.id)
-        .filter(
-            Share.trustee_user_id == user.id,
-            VaultTrustee.trustee_user_id == user.id,
-            VaultTrustee.status == 'active'
-        )
-        .all()
-    )
+    user = user_repository.find_by_username(session['usuario'])
+    mis_shares = share_repository.list_active_for_trustee(user.id)
     
     return render_template('trustee_dashboard.html', shares=mis_shares)
 
@@ -355,101 +212,31 @@ def release_share(share_id):
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
 
-    user = User.query.filter_by(username=session['usuario']).first()
-    share = db.get_or_404(Share, share_id)
+    user = user_repository.find_by_username(session['usuario'])
+    share = share_repository.get_or_404(db, share_id)
     doc = share.document
 
-    membership = VaultTrustee.query.filter_by(
-        id=share.vault_trustee_id,
-        trustee_user_id=user.id,
-        status='active'
-    ).first()
+    membership = vault_repository.find_active_membership(share.vault_trustee_id, user.id)
 
     if share.trustee_user_id != user.id or membership is None:
         return "Acceso denegado", 403
 
     if request.method == 'POST':
         password = request.form['password']
-        crypto_sym = SecureVaultD6Crypto()
-        vault_signed = SecureVaultSignedCrypto()
-        
         try:
-            # Desbloquear el Llavero Privado del Fiduciario
-            unwrapped_keystore = crypto_sym.unwrap_private_key(
-                user.encrypted_private_key, 
-                salt_hex=user.key_salt,
-                nonce_hex=user.key_nonce,
-                password=password
-            )
-            # El fiduciario usa su llave de cifrado (secp256k1) para descifrar el fragmento
-            trustee_enc_priv, _ = unwrapped_keystore.split(':')
-            
-            # Descifrar el fragmento de Shamir usando ECIES
-            encrypted_frag_bytes = bytes.fromhex(share.encrypted_fragment)
-            plain_frag_bytes = ecies.decrypt(trustee_enc_priv, encrypted_frag_bytes)
-            
-            # Guardar el fragmento liberado en la BD
-            share.plain_fragment = plain_frag_bytes.decode('utf-8')
-            db.session.commit()
-            
-            # Verificar política de trustees activa del vault
-            active_trustees_count = VaultTrustee.query.filter_by(vault_id=doc.vault_id, status='active').count()
-            if active_trustees_count < 2:
-                return jsonify({"error": "La bóveda tiene menos de 2 fiduciarios activos. No es recuperable."}), 400
+            decrypt_and_store_share_fragment(db, user, share, password)
+            result = release_share_and_maybe_decrypt(db, user, share)
 
-            threshold = max(2, doc.vault.threshold)
-            if threshold > active_trustees_count:
-                return jsonify({"error": "La política actual de umbral es inconsistente con fiduciarios activos."}), 400
-
-            # Verificar umbral de tokens liberados
-            liberados = Share.query.filter(Share.document_id == doc.id, Share.plain_fragment != None).all()
-            
-            if len(liberados) >= threshold:
-                # Leer el contenedor
-                with open(doc.storage_path, "r", encoding="utf-8") as f:
-                    vault_container = json.load(f)
-                
-                # Verificación de firma digital (Antes de descifrar)
-                if "signature" not in vault_container or "signer_id" not in vault_container:
-                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
-                    
-                data_to_verify = vault_signed._get_data_to_sign(vault_container)
-                try:
-                    pub_key_obj = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(vault_container["signer_id"]))
-                    pub_key_obj.verify(bytes.fromhex(vault_container["signature"]), data_to_verify)
-                except InvalidSignature:
-                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
-                
-                # Reconstruir llave y descifrar (Flujo Seguro)
-                shares_list = [s.plain_fragment for s in liberados]
-                file_key = reconstruct_key(shares_list)
-                
-                nonce = bytes.fromhex(vault_container["metadata"]["nonce"])
-                aad_dict = {"metadata": vault_container["metadata"], "recipients": vault_container["recipients"]}
-                aad = json.dumps(aad_dict, sort_keys=True).encode('utf-8')
-                ciphertext_with_tag = bytes.fromhex(vault_container["ciphertext"]) + bytes.fromhex(vault_container["tag"])
-                
-                aesgcm = AESGCM(file_key)
-                try:
-                    plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
-                except InvalidTag:
-                    return jsonify({"error": "Acceso Denegado: Credenciales inválidas o contenedor comprometido."}), 400
-                
-                original_filename = vault_container["metadata"]["filename"]
-                # Retornar el archivo
+            if result["type"] == "file":
                 return send_file(
-                    io.BytesIO(plaintext),
+                    io.BytesIO(result["content"]),
                     as_attachment=True,
-                    download_name=original_filename,
+                    download_name=result["filename"],
                     mimetype='application/octet-stream'
                 )
-            else:
-                # Si faltanm tokens regresa json
-                mensaje = f"Firma válida. Se han reunido {len(liberados)} de {threshold} tokens necesarios."
-                return jsonify({"status": "success", "message": mensaje}), 200
+            return jsonify(result["payload"]), result["status_code"]
                 
         except ValueError as e:
-            # SI LA CONTRASEÑA ES INCORRECTA, RETORNAMOS UN ERROR JSON
             return jsonify({"error": f"Error criptográfico o contraseña incorrecta: {str(e)}"}), 400
         except Exception as e:
             return jsonify({"error": f"Error interno: {str(e)}"}), 500
@@ -462,13 +249,20 @@ def download_vault(doc_id):
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
         
-    user = User.query.filter_by(username=session['usuario']).first()
-    doc = db.get_or_404(Document, doc_id)
+    user = user_repository.find_by_username(session['usuario'])
+    doc = document_repository.get_or_404(db, doc_id)
     
     if doc.owner_user_id != user.id:
         return "No tienes permiso para descargar este archivo", 403
-        
-    return send_file(doc.storage_path, as_attachment=True)
+
+    storage_path = doc.storage_path or ""
+    if not os.path.isabs(storage_path):
+        storage_path = os.path.abspath(os.path.join(current_app.config["UPLOAD_FOLDER"], os.path.basename(storage_path)))
+
+    if not os.path.exists(storage_path):
+        return jsonify({"error": "El archivo .vault no existe en almacenamiento."}), 404
+
+    return send_file(storage_path, as_attachment=True)
 
 # --- Ruta para descargar la Identidad Digital (Para todos los usuarios) ---
 @bp.route('/download_identity')
@@ -476,7 +270,7 @@ def download_identity():
     if 'usuario' not in session:
         return redirect(url_for('main.login'))
         
-    user = User.query.filter_by(username=session['usuario']).first()
+    user = user_repository.find_by_username(session['usuario'])
     
     try:
         keystore = json.loads(user.encrypted_private_key) if user.encrypted_private_key else {}
@@ -497,7 +291,7 @@ def download_identity():
             "wrap_algorithm": (keystore.get("wrap") or {}).get("algorithm", "AES-GCM-256"),
             "nonce": (keystore.get("wrap") or {}).get("nonce", user.key_nonce),
             "wrap_version": keystore.get("wrap_version", 1),
-            "lifecycle_state": "active",
+            "lifecycle_state": getattr(user, "keystore_lifecycle_state", None) or "active",
         },
         "description": "Este archivo contiene tu llave privada cifrada. No la compartas y recuerda tu contraseña."
     }
@@ -538,21 +332,34 @@ def restore_identity():
     if not encrypted_private_key:
         return jsonify({"error": "El archivo no contiene llave privada cifrada."}), 400
 
-    crypto_sym = SecureVaultD6Crypto()
+    if identity_data.get("username") != session.get("usuario"):
+        return jsonify({"error": "El archivo de identidad no corresponde al usuario en sesión."}), 400
+
+    enc_pub = identity_data.get("public_key")
+    sign_pub = identity_data.get("signing_public_key")
+    if not enc_pub or not sign_pub:
+        return jsonify({"error": "El archivo de identidad no incluye llaves públicas completas."}), 400
+
     try:
-        # Valida contraseña y detecta tampering antes de restaurar
-        crypto_sym.unwrap_private_key(
+        validate_identity_payload(
             encrypted_private_key,
-            salt_hex=(identity_data.get("keystore_metadata") or {}).get("salt"),
-            nonce_hex=(identity_data.get("keystore_metadata") or {}).get("nonce"),
-            password=password,
+            (identity_data.get("keystore_metadata") or {}).get("salt"),
+            (identity_data.get("keystore_metadata") or {}).get("nonce"),
+            password,
+            expected_encryption_pub=enc_pub,
+            expected_signing_pub=sign_pub,
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
 
-    user = User.query.filter_by(username=session['usuario']).first()
+    user = user_repository.find_by_username(session['usuario'])
     user.encrypted_private_key = encrypted_private_key
     user.key_salt = (identity_data.get("keystore_metadata") or {}).get("salt")
     user.key_nonce = (identity_data.get("keystore_metadata") or {}).get("nonce")
+    user.public_key = enc_pub
+    user.signing_public_key = sign_pub
+    meta = identity_data.get("keystore_metadata") or {}
+    if meta.get("lifecycle_state") in ("active", "rotated", "retired"):
+        user.keystore_lifecycle_state = meta["lifecycle_state"]
     db.session.commit()
     return jsonify({"status": "success", "message": "Identidad restaurada correctamente."}), 200
