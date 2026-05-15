@@ -157,3 +157,32 @@ To ensure the correct functionality,y we assume that the following is achieved:
  - Hernandez Ruiz de Esparza Guillermo **(Chief Documentation)**
  - Sanchez Villlalpando Johan **(Chief Coding)**
  - Quintana Mora Luis Angel **(Chief Architecture)**
+
+## Local setup (Poetry)
+
+### Install Poetry (once)
+
+**Linux / macOS** — in a terminal:
+
+```bash
+curl -sSL https://install.python-poetry.org | python3 -
+```
+
+Follow the installer note to add Poetry to your `PATH` (often `~/.local/bin`). You can verify with `poetry --version`.
+
+**Windows** — in PowerShell:
+
+```powershell
+(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -
+```
+
+If `py` is not available, use `python` instead. Restart the terminal, then check `poetry --version`.
+
+*(Alternative on either OS: install [pipx](https://pypa.github.io/pipx/) and run `pipx install poetry`.)*
+
+### Project
+
+1. Copy `.env.example` to `.env` (or use `.env.dev`).
+2. Install dependencies: `poetry install`
+3. Initialize DB: `poetry run flask --app app/app.py init-db`
+4. Run app: `poetry run flask --app app/app.py run`
