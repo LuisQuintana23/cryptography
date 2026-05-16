@@ -1,5 +1,12 @@
+"""
+Integración D6 con la app Flask (BD, rutas, `app.services`).
+
+Cripto pura: `tests/test_crypto_d6_unit.py` (sin cargar `app`).
+"""
+
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -7,17 +14,20 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT_DIR / "app"
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+for path in (APP_DIR, ROOT_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 import app as app_module  # noqa: E402
-import config as app_config  # noqa: E402
-from crypto_d6 import SecureVaultD6Crypto  # noqa: E402
-from extensions import db  # noqa: E402
-from models import User  # noqa: E402
+from crypto.crypto_d6 import SecureVaultD6Crypto  # noqa: E402
+from db.extensions import db  # noqa: E402
+from db.models import User  # noqa: E402
+from repositories.user_repository import UserRepository  # noqa: E402
+from services.auth_service import rotate_user_vault_credentials  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -27,9 +37,9 @@ def app_ctx():
     upload_dir = Path(temp_dir.name) / "vault_storage"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    app_config.Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_path}"
-    app_config.Config.UPLOAD_FOLDER = str(upload_dir)
-    app_config.Config.TESTING = True
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+    os.environ["UPLOAD_FOLDER"] = str(upload_dir)
+    os.environ["TESTING"] = "true"
 
     app = app_module.create_app()
     client = app.test_client()
@@ -56,33 +66,6 @@ def reset_state(app_ctx):
 
 def _login(client, username: str, password: str):
     return client.post("/login", data={"username": username, "password": password}, follow_redirects=False)
-
-
-def test_keystore_correct_password_succeeds():
-    crypto = SecureVaultD6Crypto()
-    private_material = "abc123:fed456"
-    wrapped = crypto.wrap_private_key(private_material, "passw0rd!")
-    recovered = crypto.unwrap_private_key(json.dumps(wrapped), password="passw0rd!")
-    assert recovered == private_material
-    assert wrapped["kdf"]["algorithm"] == "PBKDF2-HMAC-SHA256"
-    assert wrapped["wrap"]["algorithm"] == "AES-GCM-256"
-    assert wrapped["key_id"]
-
-
-def test_keystore_wrong_password_fails():
-    crypto = SecureVaultD6Crypto()
-    wrapped = crypto.wrap_private_key("owner-priv:sign-priv", "correct-password")
-    with pytest.raises(ValueError):
-        crypto.unwrap_private_key(json.dumps(wrapped), password="wrong-password")
-
-
-def test_modified_keystore_fails():
-    crypto = SecureVaultD6Crypto()
-    wrapped = crypto.wrap_private_key("owner-priv:sign-priv", "correct-password")
-    tampered = dict(wrapped)
-    tampered["encrypted_key"] = wrapped["encrypted_key"][:-1] + ("0" if wrapped["encrypted_key"][-1] != "0" else "1")
-    with pytest.raises(ValueError):
-        crypto.unwrap_private_key(json.dumps(tampered), password="correct-password")
 
 
 def test_backup_restore_identity_succeeds(app_ctx):
@@ -122,14 +105,62 @@ def test_backup_restore_identity_succeeds(app_ctx):
         assert admin.encrypted_private_key == backup_payload["encrypted_private_key"]
 
 
-def test_stolen_keystore_alone_cannot_decrypt(app_ctx):
+def test_restore_rejects_foreign_identity_username(app_ctx):
     client = app_ctx["client"]
-    login = _login(client, "admin", "secreto123")
-    assert login.status_code == 302
+    assert _login(client, "trustee1", "clave1").status_code == 302
+    foreign_backup = client.get("/download_identity").data
+    client.get("/logout")
+    assert _login(client, "admin", "secreto123").status_code == 302
 
-    backup_response = client.get("/download_identity")
-    payload = json.loads(backup_response.data.decode("utf-8"))
+    restore_response = client.post(
+        "/restore_identity",
+        data={
+            "password": "clave1",
+            "identity_file": (io.BytesIO(foreign_backup), "identity_trustee1.json"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert restore_response.status_code == 400
 
+
+def test_restore_rejects_mismatched_public_keys(app_ctx):
+    client = app_ctx["client"]
+    app = app_ctx["app"]
+    assert _login(client, "admin", "secreto123").status_code == 302
+    backup = json.loads(client.get("/download_identity").data.decode("utf-8"))
+
+    with app.app_context():
+        trustee1 = User.query.filter_by(username="trustee1").first()
+        assert trustee1 is not None
+        backup["public_key"] = trustee1.public_key
+
+    restore_response = client.post(
+        "/restore_identity",
+        data={
+            "password": "secreto123",
+            "identity_file": (io.BytesIO(json.dumps(backup).encode("utf-8")), "identity_admin.json"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert restore_response.status_code == 400
+
+
+def test_rotate_vault_credentials_updates_login_and_keystore(app_ctx):
+    client = app_ctx["client"]
+    app = app_ctx["app"]
+
+    with app.app_context():
+        admin = UserRepository().find_by_username("admin")
+        assert admin is not None
+        rotate_user_vault_credentials(db, admin, "secreto123", "nuevoPass9", commit=True)
+
+    client.get("/logout")
+    assert _login(client, "admin", "secreto123").status_code != 302
+    assert _login(client, "admin", "nuevoPass9").status_code == 302
+
+    backup = json.loads(client.get("/download_identity").data.decode("utf-8"))
     crypto = SecureVaultD6Crypto()
     with pytest.raises(ValueError):
-        crypto.unwrap_private_key(payload["encrypted_private_key"], password="not-the-password")
+        crypto.unwrap_private_key(backup["encrypted_private_key"], password="secreto123")
+    material = crypto.unwrap_private_key(backup["encrypted_private_key"], password="nuevoPass9")
+    assert ":" in material

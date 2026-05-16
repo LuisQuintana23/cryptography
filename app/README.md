@@ -6,16 +6,17 @@ This repo contains a working Flask app under `app/` that seals documents into a 
 ```sh
 python -m venv .venv
 source ./.venv/bin/activate
-pip install -r requirements.txt
-flask --app app init-db
-python app.py
+poetry install
+cp ../.env.example ../.env || true
+flask --app app/app.py init-db
+flask --app app/app.py run
 ```
 ### Test users (created by `init-db`)
 - **Owner**: `admin` / `secreto123`
 - **Trustees**: `trustee1` / `clave1`, `trustee2` / `clave2`
 
 ### End-to-end flow
-- **Owner**: login → “Sellar Nuevo Documento” (`/upload`) → generates a `.vault` JSON in `app/vault_storage/` and assigns encrypted Shamir shares to trustees.
+- **Owner**: login → “Sellar Nuevo Documento” (`/upload`) → generates a `.vault` JSON in `storage/vault/` and assigns encrypted Shamir shares to trustees.
 - **Trustee**: login → “Panel de Fiduciario” → “Liberar mi Token” (`/release/<share_id>`) → once threshold is met, the server reconstructs the file key and returns the decrypted file as a download.
 - **Owner/Trustee**: can download an **identity file** (`/download_identity`) containing the public key plus the **password-wrapped private key** needed for offline recovery.
 - **New user**: use `/register` (or "Crear Cuenta") to create a unified account with encrypted key material.

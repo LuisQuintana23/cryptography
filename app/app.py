@@ -1,26 +1,28 @@
 from flask import Flask
 import os
-import click 
-import json
+import click
+import sys
+from pathlib import Path
 
-# Importar configuraciones locales
-from extensions import db
-from config import Config
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from dotenv import load_dotenv
+
+from db.extensions import db
+from config import get_settings
 from routes import bp
+from services.auth_service import register_user, rotate_user_vault_credentials, seed_default_users
+from repositories.user_repository import UserRepository
 
-# Importaciones necesarias para inicializar la BD
-from models import User
-from werkzeug.security import generate_password_hash
-
-# Importaciones del Motor Simétrico (D2) y el Nuevo Motor Híbrido con Firmas (D5)
-from crypto_d6 import SecureVaultD6Crypto
-from crypto_d5_signatures import SecureVaultSignedCrypto
+user_repository = UserRepository()
 
 def create_app():
     """Patrón de Fábrica de Aplicaciones (Application Factory)"""
+    load_dotenv(ROOT_DIR / ".env")
     app = Flask(__name__)
-    app.config.from_object(Config)
-
+    app.config.from_mapping(get_settings())
     # Inicializar las extensiones
     db.init_app(app)
 
@@ -40,49 +42,28 @@ def create_app():
         db.drop_all() 
         db.create_all()
         
-        usuarios_test = [
-            {"u": "admin", "p": "secreto123"},
-            {"u": "trustee1", "p": "clave1"},
-            {"u": "trustee2", "p": "clave2"},
-            {"u": "notrustee", "p": "clave3"},
-        ]
+        usuarios_test = seed_default_users()
         
-        # Instanciamos los motores criptográficos
-        crypto_sym = SecureVaultD6Crypto()         # Keystore endurecido D6
-        vault_signed = SecureVaultSignedCrypto()   # Para generar las llaves D5
-
         for user_data in usuarios_test:
-            if not User.query.filter_by(username=user_data["u"]).first():
+            if not user_repository.find_by_username(user_data["u"]):
                 click.echo(f"Creando usuario: {user_data['u']}...")
                 
-                # Generar ambas identidades criptográficas
-                enc_priv, enc_pub = vault_signed.generate_encryption_keypair()
-                sign_priv, sign_pub = vault_signed.generate_signing_keypair()
-                
-                # Keystore: Unimos ambas llaves privadas separadas por ":"
-                # Esto evita reutilizar Nonces de AES-GCM y ahorra espacio en la base de datos
-                combined_privates = f"{enc_priv}:{sign_priv}"
-                
-                # Cifrar el llavero completo con la contraseña del usuario
-                wrapped = crypto_sym.wrap_private_key(combined_privates, user_data["p"])
-                
-                # Guardar en Base de Datos
-                new_user = User(
-                    username=user_data["u"],
-                    password_hash=generate_password_hash(user_data["p"]),
-                    
-                    # Llaves Públicas (Visibles para todos)
-                    public_key=enc_pub,
-                    signing_public_key=sign_pub,
-                    # Llavero Privado Cifrado
-                    encrypted_private_key=json.dumps(wrapped),
-                    key_salt=wrapped["salt"],
-                    key_nonce=wrapped["nonce"]
-                )
-                db.session.add(new_user)
+                register_user(db, user_data["u"], user_data["p"], commit=False)
         
         db.session.commit()
         click.echo("Base de datos inicializada y llenada con éxito (Llaves Ed25519 integradas).")
+
+    @app.cli.command("rotate-user-credentials")
+    @click.argument("username")
+    @click.argument("old_password")
+    @click.argument("new_password")
+    def rotate_user_credentials_cmd(username, old_password, new_password):
+        """Re-envuelve el keystore y actualiza el hash de login (rotación mínima D6)."""
+        user = user_repository.find_by_username(username)
+        if not user:
+            raise click.ClickException("Usuario no encontrado.")
+        rotate_user_vault_credentials(db, user, old_password, new_password, commit=True)
+        click.echo(f"Credenciales rotadas para {username}.")
 
     return app
 
@@ -90,4 +71,4 @@ def create_app():
 app = create_app()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=app.config["DEBUG"])
