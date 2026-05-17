@@ -21,6 +21,8 @@ __pycache__/
 instance/
 
 # Ignorar los archivos físicos de la bóveda
+app/vault_storage/
+storage/vault/
 vault_storage/
 *.vault
 

@@ -1,4 +1,6 @@
 import io
+import json
+import os
 import shutil
 import sys
 import tempfile
@@ -6,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT_DIR / "app"
@@ -13,9 +16,8 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 import app as app_module  # noqa: E402
-import config as app_config  # noqa: E402
-from extensions import db  # noqa: E402
-from models import Document, Share, User  # noqa: E402
+from db.extensions import db  # noqa: E402
+from db.models import Document, Share, User, Vault, VaultTrustee  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -25,9 +27,9 @@ def test_context():
     upload_dir = Path(temp_dir.name) / "vault_storage"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    app_config.Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_path}"
-    app_config.Config.UPLOAD_FOLDER = str(upload_dir)
-    app_config.Config.TESTING = True
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+    os.environ["UPLOAD_FOLDER"] = str(upload_dir)
+    os.environ["TESTING"] = "true"
 
     app = app_module.create_app()
     client = app.test_client()
@@ -72,10 +74,18 @@ def _upload_sample_vault(test_context, filename: str = "baseline.txt", data: byt
     login_response = _login(client, "admin", "secreto123")
     assert login_response.status_code == 302
 
+    with app.app_context():
+        trustee_ids = [
+            str(user.id)
+            for user in User.query.filter(User.username.in_(["trustee1", "trustee2"])).all()
+        ]
+        assert len(trustee_ids) == 2
+
     response = client.post(
         "/upload",
         data={
             "password": "secreto123",
+            "selected_trustees": trustee_ids,
             "file": (io.BytesIO(data), filename),
         },
         content_type="multipart/form-data",
@@ -112,6 +122,27 @@ def test_upload_and_seal_vault_container(test_context):
         assert document is not None
         assert Path(document.storage_path).exists()
         assert Share.query.filter_by(document_id=document.id).count() > 0
+        assert document.vault_id is not None
+        assert document.vault.threshold >= 2
+
+        with open(document.storage_path, encoding="utf-8") as f:
+            vault = json.load(f)
+        # Regresión: el handler de upload no debe consumir el stream antes del cifrado (PDF 0 bytes).
+        assert len(bytes.fromhex(vault["ciphertext"])) > 0
+
+
+def test_same_filename_uploads_do_not_collide(test_context):
+    app = test_context["app"]
+    _upload_sample_vault(test_context, filename="same-name.pdf", data=b"content-a")
+    _upload_sample_vault(test_context, filename="same-name.pdf", data=b"content-b")
+
+    with app.app_context():
+        docs = Document.query.filter_by(filename="same-name.pdf").order_by(Document.id.asc()).all()
+        assert len(docs) == 2
+        assert docs[0].vault_id != docs[1].vault_id
+        assert docs[0].storage_path != docs[1].storage_path
+        assert Path(docs[0].storage_path).exists()
+        assert Path(docs[1].storage_path).exists()
 
 
 def test_trustee_release_threshold_reconstruction_flow(test_context):
@@ -147,3 +178,68 @@ def test_trustee_release_threshold_reconstruction_flow(test_context):
     response_2 = client.post(f"/release/{share2_id}", data={"password": "clave2"})
     assert response_2.status_code == 200
     assert "attachment" in response_2.headers.get("Content-Disposition", "")
+    assert len(response_2.data) > 0
+    assert response_2.data == b"threshold-case"
+
+
+def test_upload_requires_at_least_two_selected_trustees(test_context):
+    client = test_context["client"]
+    app = test_context["app"]
+    login_response = _login(client, "admin", "secreto123")
+    assert login_response.status_code == 302
+
+    with app.app_context():
+        one_trustee = User.query.filter_by(username="trustee1").first()
+        assert one_trustee is not None
+
+    response = client.post(
+        "/upload",
+        data={
+            "password": "secreto123",
+            "selected_trustees": [str(one_trustee.id)],
+            "file": (io.BytesIO(b"sample"), "one-trustee.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "Se requieren al menos 2 fiduciarios" in payload["error"]
+
+
+def test_recovery_blocked_when_trustee_policy_becomes_invalid(test_context):
+    client = test_context["client"]
+    app = test_context["app"]
+    document_id = _upload_sample_vault(test_context, filename="policy.txt", data=b"policy-case")
+    _logout(client)
+
+    with app.app_context():
+        trustee1 = User.query.filter_by(username="trustee1").first()
+        trustee2 = User.query.filter_by(username="trustee2").first()
+        assert trustee1 and trustee2
+
+        share1 = Share.query.filter_by(document_id=document_id, trustee_user_id=trustee1.id).first()
+        share2 = Share.query.filter_by(document_id=document_id, trustee_user_id=trustee2.id).first()
+        assert share1 and share2
+        share1_id = share1.id
+        share2_id = share2.id
+
+    # Primer token válido
+    assert _login(client, "trustee1", "clave1").status_code == 302
+    response_1 = client.post(f"/release/{share1_id}", data={"password": "clave1"})
+    assert response_1.status_code == 200
+    _logout(client)
+
+    # Inactivar membresía del segundo trustee y forzar política inválida
+    with app.app_context():
+        share2 = db.session.get(Share, share2_id)
+        membership = db.session.get(VaultTrustee, share2.vault_trustee_id)
+        membership.status = "revoked"
+        doc = db.session.get(Document, document_id)
+        vault = db.session.get(Vault, doc.vault_id)
+        vault.threshold = 2
+        db.session.commit()
+
+    # Debe bloquear recuperación por política inconsistente (<2 activos)
+    assert _login(client, "trustee2", "clave2").status_code == 302
+    response_2 = client.post(f"/release/{share2_id}", data={"password": "clave2"})
+    assert response_2.status_code == 403 or response_2.status_code == 400

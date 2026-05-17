@@ -42,6 +42,23 @@
                         </small>
                     </div>
 
+                    <div class="mb-4">
+                        <label for="trusteeSearchInput" class="form-label text-light fw-bold">Asignar fiduciarios</label>
+                        <p class="text-muted small mb-2">Escribe un username exacto y usa <strong>Add Trustee</strong>. Debes elegir mínimo 2.</p>
+                        <div id="selectedTrusteesContainer" class="border border-secondary rounded p-2 mb-2 d-flex flex-wrap gap-2"></div>
+                        <div class="input-group">
+                            <input
+                                class="form-control bg-dark border-secondary text-light"
+                                id="trusteeSearchInput"
+                                type="text"
+                                autocomplete="off"
+                                placeholder="Username del fiduciario..."
+                            >
+                            <button class="btn btn-outline-info" id="addTrusteeBtn" type="button">Add Trustee</button>
+                        </div>
+                        <div id="selectedTrusteesInputs"></div>
+                    </div>
+
                     <div class="mb-3">
                             <label for="password" class="form-label">Contraseña (Para firmar digitalmente el archivo):</label>
                             <input type="password" class="form-control" name="password" id="password" required>
@@ -66,8 +83,108 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const searchInput = document.getElementById('trusteeSearchInput');
+const addTrusteeBtn = document.getElementById('addTrusteeBtn');
+const chipsEl = document.getElementById('selectedTrusteesContainer');
+const hiddenInputsEl = document.getElementById('selectedTrusteesInputs');
+const selectedTrustees = new Map();
+
+function renderTrusteeChips() {
+    chipsEl.innerHTML = '';
+    hiddenInputsEl.innerHTML = '';
+
+    selectedTrustees.forEach((username, id) => {
+        const chip = document.createElement('span');
+        chip.className = 'badge rounded-pill text-bg-info d-inline-flex align-items-center gap-2 px-3 py-2';
+        chip.textContent = username;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-close btn-close-white btn-sm';
+        removeBtn.setAttribute('aria-label', 'Quitar fiduciario');
+        removeBtn.addEventListener('click', () => {
+            selectedTrustees.delete(id);
+            renderTrusteeChips();
+        });
+
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'selected_trustees';
+        hidden.value = id;
+        hiddenInputsEl.appendChild(hidden);
+
+        chip.appendChild(removeBtn);
+        chipsEl.appendChild(chip);
+    });
+}
+
+async function addTrusteeByUsername() {
+    const query = this.value.trim();
+    if (query.length < 1) {
+        return;
+    }
+    try {
+        const response = await fetch(`{{ url_for('main.resolve_trustee') }}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: query })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            Swal.fire({
+                title: 'No encontrado',
+                text: data.error || 'No se pudo resolver el fiduciario.',
+                icon: 'warning',
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#ffc107'
+            });
+            return;
+        }
+        const id = String(data.id);
+        if (selectedTrustees.has(id)) {
+            Swal.fire({
+                title: 'Ya agregado',
+                text: 'Ese fiduciario ya está en tu selección.',
+                icon: 'info',
+                background: '#212529', color: '#f8f9fa', confirmButtonColor: '#0dcaf0'
+            });
+            return;
+        }
+        selectedTrustees.set(id, data.username);
+        renderTrusteeChips();
+        searchInput.value = '';
+        searchInput.focus();
+    } catch (err) {
+        Swal.fire({
+            title: 'Error',
+            text: 'No se pudo validar el fiduciario.',
+            icon: 'error',
+            background: '#212529', color: '#f8f9fa', confirmButtonColor: '#dc3545'
+        });
+        return;
+    }
+}
+
+addTrusteeBtn.addEventListener('click', addTrusteeByUsername.bind(searchInput));
+searchInput.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        addTrusteeByUsername.call(searchInput);
+    }
+});
+
 document.getElementById('uploadForm').addEventListener('submit', function(e) {
     e.preventDefault(); 
+
+    if (selectedTrustees.size < 2) {
+        Swal.fire({
+            title: 'Fiduciarios insuficientes',
+            text: 'Debes seleccionar al menos 2 fiduciarios.',
+            icon: 'warning',
+            background: '#212529', color: '#f8f9fa', confirmButtonColor: '#ffc107'
+        });
+        return;
+    }
+
     // Alerta de procesamiento (Crucial para operaciones criptográficas)
     Swal.fire({
         title: 'Cifrando Documento',
